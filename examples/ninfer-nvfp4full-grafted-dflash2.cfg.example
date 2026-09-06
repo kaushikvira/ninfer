@@ -1,0 +1,52 @@
+# =============================================================================
+# NINFER NVFP4FULL + DFLASH2 serving profile (cometkim v1 + z-lab DFlash2 graft)
+# Model: kaushikvira/Qwen3.8-27B-nvfp4full-dflash2-NInfer (see HF card)
+# Artifact : qwen3_8_27b_nvfp4full-dflash2.ninfer
+# SHA-256  : 373dab08733f96555d964e02c6cebe40b23f753c0b2c4592fe130d641f937de1
+# Engine   : github.com/kaushikvira/ninfer (upstream master + 1 commit)
+# Verified on RTX 5090 (32 GB), CUDA 13.1: decode 175.2 tok/s, needle 12/12,
+# KV 283,840 tokens (k8v4, auto), free 2.75 GiB, C=4 527.1 tok/s.
+#
+# Portability notes (tweak per machine):
+#   NINFER_ARTIFACT_HOST  = host directory containing the .ninfer file
+#   NINFER_ARTIFACT       = container path; adjust to your harness mounts
+#   The API key is NOT in this file: serve.sh reads ~/.secrets/vllm-api-key
+#   (or set your own env) — never commit a real key.
+# =============================================================================
+
+NAME=ninfer-nvfp4full-grafted-dflash2
+ENGINE=ninfer
+PORT=8000
+NINFER_IMAGE=ninfer-master:local
+NINFER_BIN=/usr/local/bin/ninfer-serve
+NINFER_ARTIFACT=/models-cometkim/qwen3_8_27b_nvfp4full-dflash2.ninfer
+NINFER_ARTIFACT_HOST=/your/models/dir
+# Deployment-compatible model id so existing clients keep working.
+NINFER_MODEL_ID=Qwen3.8-27B
+
+# --- context / memory ---
+NINFER_MAX_CONTEXT=262144
+# auto = fit full 262k on device; measured 283,840 tokens at k8v4 on a 32 GB 5090
+NINFER_KV_CAPACITY=auto
+NINFER_KV_DTYPE=k8v4
+
+# --- concurrency ---
+NINFER_MAX_CONCURRENCY=4
+
+# --- admission / request lifetimes ---
+NINFER_DEFAULT_MAX_TOKENS=32768
+NINFER_PENDING_TIMEOUT_MS=900000
+NINFER_PREFILL_CHUNK=2048
+NINFER_REQUEST_LOG_JSONL=/var/log/ninfer/requests-nvfp4full-dflash2.jsonl
+
+# --- speculative decode (DFlash2 K=7; K=1..15 supported) ---
+# NOTE: do NOT pass --lm-head-draft with dflash2 (full proposal head is default)
+NINFER_SPEC=dflash2
+NINFER_DRAFT_TOKENS=7
+NINFER_LM_HEAD_DRAFT=0
+
+# --- sampling (applies to requests that omit sampling params) ---
+NINFER_SAMPLING="--temperature 0.9 --min-p 0.05"
+
+# --- host KV cache + vision + thinking ---
+NINFER_EXTRA_FLAGS="--host-kv-mib 32768 --max-shared-prefixes 8 --vision --default-thinking-budget 8192 --preserve-thinking"
