@@ -148,7 +148,8 @@ ModelInstance::ModelInstance(std::unique_ptr<models::qwen3_5::Model> source,
                                .max_context              = options.max_context,
                                .media_cache_bytes        = options.media_cache_bytes,
                                .media_live_bytes         = options.media_live_bytes,
-                               .media_preprocess_threads = options.media_preprocess_threads})),
+                               .media_preprocess_threads = options.media_preprocess_threads,
+                               .image_token_budget       = options.image_token_budget})),
       capacity(options.max_context) {}
 
 ModelInstance::~ModelInstance() = default;
