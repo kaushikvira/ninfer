@@ -16,7 +16,7 @@ This fork exists to *ship* what upstream hasn't merged yet, not to diverge:
 - **Never drift**: no big rewrites, no third-party infra, no vendor lock-in.
   If we need something upstream rejects, keep it minimal and documented here.
 
-## Carried commits (as of 2026-09-07)
+## Carried commits (as of 2026-09-15)
 
 This fork = upstream `Neroued/ninfer` master (`487f8977`) + the commits below.
 
@@ -29,6 +29,8 @@ This fork = upstream `Neroued/ninfer` master (`487f8977`) + the commits below.
 | `e202c53b` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
 | `7e8ad2e9` | cherry-pick `545f64b0` | **#160** (MichaelDementii) | NVFP4 TMA route reads activation scales tile-contiguous (prefill +1-2.5% on our box) | When #160 merges |
 | `4ac61fa2` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling + **our validator fix** (allow policy-lowered `image_max_pixels`) | When #61 merges (verify our validator hunk is included; we posted it as a comment) |
+| `8a42a465` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
+| `6e9e928a` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
 
 ## How to re-sync after an upstream merge
 
