@@ -1,7 +1,9 @@
 # Fork notes — kaushikvira/ninfer
 
-This fork is **upstream `Neroued/ninfer` master + exactly one engine commit**, plus one
-tooling commit for artifact grafting.
+This fork is **upstream `Neroued/ninfer` master `487f8977` + the carried commits
+below** (one own engine commit, one tooling commit, and temporary upstream-PR
+ports that get dropped when they merge upstream). The authoritative registry
+with sources and drop triggers is [`PATCHES.md`](PATCHES.md).
 
 ## Model built with this fork
 
@@ -12,14 +14,22 @@ Sanitized serving profile (as used on our rig — KV auto/k8v4, DFlash2 K=7,
 vision, host-KV 32 GiB, sampling defaults; **no secrets**):
 [examples/ninfer-nvfp4full-grafted-dflash2.cfg.example](examples/ninfer-nvfp4full-grafted-dflash2.cfg.example)
 
-## Engine delta vs upstream (`main` here)
+## Carried commits vs upstream (`main` here)
 
 | Commit | Type | What |
 |---|---|---|
-| `2eb59dbc` | **engine (the +1)** | `feat: register qwen3.8-27b/nvfp4full weights profile (port of cometkim feat/qwen3.8-nvfp4full)` — 4 files: `package.h`, `package.cpp`, `bindings.cpp`, `variant.cpp`. Enables the cometkim `qwen3.8-27b/nvfp4full` weight profile (full-NVFP4 27B) on upstream master. |
-| `4c520495` | tooling | `tools: graft z-lab DFlash2 module (W8G32/BF16) onto cometkim nvfp4full v1` — `tools/artifact/graft_dflash2_w8.py`, used to build DFlash2-capable artifacts (see the HF model card), no engine changes. |
+| `2eb59dbc` | **engine (own)** | register `qwen3.8-27b/nvfp4full` weights profile (port of cometkim `feat/qwen3.8-nvfp4full`) — 4 files: `package.h`, `package.cpp`, `bindings.cpp`, `variant.cpp`. Enables the cometkim full-NVFP4 27B profile on upstream master. Keep. |
+| `65bbf8b5` | tooling | DFlash2 graft tool `tools/artifact/graft_dflash2_w8.py` + fork notes + sanitized serving example — builds DFlash2-capable artifacts (see the HF model card), no engine changes. Keep. |
+| `71b4c9b2` | engine (temp) | OpenAI Responses: accept `include=reasoning.encrypted_content` + `reasoning.summary` (cherry-pick of upstream PR #148, `193dab17`). Drop when #148 merges. |
+| `bcc6261e` | engine (temp) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn; ours, derived from #148 which only handled the create side). Drop when #148 lands + upstream covers the input side. |
+| `e202c53b` | build (temp) | ccache + BuildKit cache mount for incremental docker builds (port of upstream PR #97, `03df31d5`). Drop when #97 merges. |
+| `7e8ad2e9` | engine (temp) | NVFP4 TMA route reads activation scales tile-contiguous (port of upstream PR #160, `545f64b0`; +1–2.5% prefill on our box). Drop when #160 merges. |
+| `4ac61fa2` | engine (temp) | `--image-token-budget N` per-image Vision-token ceiling + our validator fix (port of upstream PR #61, `eb413c76`). Drop when #61 merges. |
+| `6e9e928a` | docs | patch registry + fork policy (`PATCHES.md`). |
+| `8a42a465` | build | curl in the runtime image (container healthcheck support). |
 
-Everything else is byte-identical to upstream `487f8977` (verify: `git log master..origin/master`).
+Everything else is byte-identical to upstream `487f8977` (verify: `git log
+origin/master..main` should show only the commits above).
 
 ## Graft tool
 
