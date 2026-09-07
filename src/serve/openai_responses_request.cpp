@@ -361,9 +361,16 @@ std::string parse_reasoning_item(const Json& item, Json& canonical) {
     if (text.empty() &&
         (has_encrypted || (item.contains("summary") && !item.at("summary").is_null() &&
                            !item.at("summary").empty()))) {
-        bad_request("reasoning Items require raw reasoning_text; summary or encrypted content "
-                    "cannot reconstruct the model context",
-                    "input", "reasoning_content_not_supported");
+        // Inspect AI (0.3.x Responses API) sends reasoning Items whose raw text was
+        // stripped after our include=reasoning.encrypted_content acceptance. The
+        // summary/encrypted payload is display metadata we cannot reconstruct into
+        // context, so skip the item instead of failing the whole request.
+        canonical = Json{{ "id", item_id(item, "rs") }, {"type", "reasoning"},
+                         {"summary", item.contains("summary") && !item.at("summary").is_null()
+                                          ? item.at("summary")
+                                          : Json::array()},
+                         {"content", Json::array()}};
+        return "skip";
     }
 
     canonical = {{"id", item_id(item, "rs")},
@@ -632,7 +639,10 @@ void parse_input(const Json& input, OpenAIResponsesPromptRequest& out,
                 out.input_turns.push_back(std::move(message.turn));
             }
         } else if (type == "reasoning") {
-            assistant.append_reasoning(parse_reasoning_item(item, canonical), index);
+            const std::string reason = parse_reasoning_item(item, canonical);
+            if (reason != "skip") {
+                assistant.append_reasoning(reason, index);
+            }
         } else if (type == "function_call") {
             assistant.append_call(parse_function_call_item(item, canonical, identities));
         } else if (type == "function_call_output") {
