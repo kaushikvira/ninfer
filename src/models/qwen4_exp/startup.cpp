@@ -47,7 +47,8 @@ qwen::Frontend Startup::frontend(const Model& model, const EngineOptions& o) con
                                 .max_context              = o.max_context,
                                 .media_cache_bytes        = o.media_cache_bytes,
                                 .media_live_bytes         = o.media_live_bytes,
-                                .media_preprocess_threads = o.media_preprocess_threads},
+                                .media_preprocess_threads = o.media_preprocess_threads,
+                                .image_token_budget       = o.image_token_budget},
                                {preset, preset});
 }
 
