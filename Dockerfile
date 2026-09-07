@@ -5,6 +5,7 @@ FROM nvidia/cuda:13.1.2-devel-ubuntu24.04 AS build
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
+        ccache \
         cmake \
         libavcodec-dev \
         libavformat-dev \
@@ -18,12 +19,21 @@ RUN apt-get update \
 WORKDIR /src
 COPY . .
 
-RUN cmake -S . -B /build -G Ninja \
+# ccache + BuildKit cache mount (PR #97): incremental rebuilds only recompile
+# changed translation units; unchanged objects hit ccache (fast). First build is
+# unchanged; subsequent docker builds drop from ~5 min to ~1-2 min.
+RUN --mount=type=cache,target=/ccache \
+    export CCACHE_DIR=/ccache CCACHE_MAXSIZE=20G; \
+    cmake -S . -B /build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
         -DNINFER_BUILD_APPS=ON \
         -DBUILD_TESTING=OFF \
         -DNINFER_BUILD_BENCHMARKS=OFF \
-    && cmake --build /build --parallel --target ninfer ninfer-serve
+    && cmake --build /build --parallel --target ninfer ninfer-serve \
+    && ccache --show-stats
 
 FROM nvidia/cuda:13.1.2-runtime-ubuntu24.04
 
