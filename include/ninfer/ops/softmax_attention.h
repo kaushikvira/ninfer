@@ -137,13 +137,19 @@ void packed_softmax_attention(const Tensor& q, const Tensor& k, const Tensor& v,
  * allocation, frontier, request identity, or commit authority. `execution` supplies the stream and
  * positive physical SM count used for launch and workspace planning; capacity queries must use the
  * same count as execution.
+ *
+ * An optional gate asks the Op to finish with out *= sigmoid(gate). When present it is a contiguous
+ * BF16 tensor shaped exactly like out and disjoint from every other operand. The Op applies the
+ * standalone elementwise multiply after the storage route; the result is bit-identical to calling
+ * sigmoid_mul on the ungated output, so no caller has to know which route it landed on.
  */
 void causal_softmax_attention(const Tensor& q, const Tensor& k, const Tensor& v,
                               const Tensor& positions, const Tensor& valid_columns,
                               const Tensor& kv_table_rows, AttentionHeadGeometry geometry,
                               float scale, PagedKVBatchLayerView cache,
                               CausalAttentionExecutionEnvelope envelope, WorkspaceArena& workspace,
-                              Tensor& out, DeviceExecutionView execution);
+                              Tensor& out, DeviceExecutionView execution,
+                              const Tensor* gate = nullptr);
 
 /**
  * Read-only single-sequence causal attention over an already populated cache.

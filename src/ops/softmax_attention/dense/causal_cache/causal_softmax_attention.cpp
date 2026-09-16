@@ -1,6 +1,8 @@
 // ninfer::ops - causal cached Softmax Attention validation and finite route dispatch.
 #include "ninfer/ops/softmax_attention.h"
 
+#include "ninfer/ops/sigmoid_mul.h"
+
 #include "core/layout.h"
 #include "core/paged_kv_storage.h"
 #include "ops/softmax_attention/dense/causal_cache/bf16/plan.h"
@@ -305,7 +307,8 @@ void causal_softmax_attention(const Tensor& q, const Tensor& k, const Tensor& v,
                               const Tensor& kv_table_rows, AttentionHeadGeometry geometry,
                               float scale, PagedKVBatchLayerView cache,
                               CausalAttentionExecutionEnvelope envelope, WorkspaceArena& workspace,
-                              Tensor& out, DeviceExecutionView execution) {
+                              Tensor& out, DeviceExecutionView execution,
+                              const Tensor* gate) {
     constexpr const char* op = "causal_softmax_attention";
     if (execution.multiprocessor_count <= 0) {
         throw std::invalid_argument(std::string(op) + ": SM count must be positive");
@@ -322,33 +325,39 @@ void causal_softmax_attention(const Tensor& q, const Tensor& k, const Tensor& v,
     require_shape(v, kHeadDim, kv_heads, width, batch, op, "v");
     require_contiguous_nonnull(k, op, "k");
     require_contiguous_nonnull(v, op, "v");
+    if (gate != nullptr) {
+        require_shape(*gate, kHeadDim, static_cast<std::int32_t>(q.ne[1]), width, batch, op,
+                      "gate");
+        require_contiguous_nonnull(*gate, op, "gate");
+        if (gate->dtype != DType::BF16) {
+            throw std::invalid_argument("causal_softmax_attention: gate must be BF16");
+        }
+    }
 
+    // One if/else-if chain, NO early return: the gate multiply below must run on every storage
+    // route. (An early return here silently drops the gate for nvfp4/bf16/fp8/int8 KV — the
+    // caller no longer applies it. That bug shipped in the 2026-10-06 re-anchor; do not reintroduce.)
     if (cache.storage == KvCacheStorage::BFloat16) {
         detail::bf16_kv_append_attention(q, k, v, positions, valid_columns, kv_table_rows, scale,
                                          cache, envelope, workspace, out, execution);
-        return;
-    }
-
-    if (cache.storage == KvCacheStorage::Fp8E4M3Row256) {
+    } else if (cache.storage == KvCacheStorage::Fp8E4M3Row256) {
         detail::fp8_kv_append_attention(q, k, v, positions, valid_columns, kv_table_rows, scale,
                                         cache, envelope, workspace, out, execution);
-        return;
-    }
-
-    if (cache.storage == KvCacheStorage::Int8Group64) {
+    } else if (cache.storage == KvCacheStorage::Int8Group64) {
         detail::int8_kv_append_attention(q, k, v, positions, valid_columns, kv_table_rows, scale,
                                          cache, envelope, workspace, out, execution);
-        return;
-    }
-
-    if (cache.storage == KvCacheStorage::Nvfp4Group16) {
+    } else if (cache.storage == KvCacheStorage::Nvfp4Group16) {
         detail::nvfp4_kv_append_attention(q, k, v, positions, valid_columns, kv_table_rows, scale,
                                           cache, envelope, workspace, out, execution);
-        return;
+    } else {
+        detail::k8v4_kv_append_attention(q, k, v, positions, valid_columns, kv_table_rows, scale,
+                                         cache, envelope, workspace, out, execution);
     }
 
-    detail::k8v4_kv_append_attention(q, k, v, positions, valid_columns, kv_table_rows, scale, cache,
-                                     envelope, workspace, out, execution);
+    // The gate is applied by the standalone elementwise multiply after the storage route. Every
+    // storage reaches its own reduce kernel, so none folds it at the store; the result is
+    // bit-identical to the pre-fold behaviour and no caller has to know which route ran.
+    if (gate != nullptr) { sigmoid_mul(*gate, out, execution.stream); }
 }
 
 void causal_softmax_attention_cached(const Tensor& q, const Tensor& positions,
