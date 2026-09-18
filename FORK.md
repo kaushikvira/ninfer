@@ -1,9 +1,16 @@
 # Fork notes — kaushikvira/ninfer
 
-This fork is **upstream `Neroued/ninfer` master `487f8977` + the carried commits
-below** (one own engine commit, one tooling commit, and temporary upstream-PR
-ports that get dropped when they merge upstream). The authoritative registry
-with sources and drop triggers is [`PATCHES.md`](PATCHES.md).
+This fork is **upstream `Neroued/ninfer` master `f76e19c0` (v3 model/weight
+decoupling) + the carried commits below** (temporary upstream-PR ports that get
+dropped when they merge, plus tooling/docs). The authoritative registry with
+sources and drop triggers is [`PATCHES.md`](PATCHES.md).
+
+> **v3 rebase note (2026-09-18):** rebasing onto upstream v3 dropped two carried
+> commits. The C++ `nvfp4full` weights-profile registration (`2eb59dbc`) is now
+> dead code — v3's loader is data-driven, so `nvfp4full` lives entirely in the
+> artifact (upgraded to a v3 container with `tools/upgrade_ninfer_v2_to_v3.py`,
+> which this fork extends to allow-list it). The PR #160 tile-contiguous-scales
+> port (`7e8ad2e9`) is superseded by upstream `1d8587bc`.
 
 ## Model built with this fork
 
@@ -18,17 +25,17 @@ vision, host-KV 32 GiB, sampling defaults; **no secrets**):
 
 | Commit | Type | What |
 |---|---|---|
-| `2eb59dbc` | **engine (own)** | register `qwen3.8-27b/nvfp4full` weights profile (port of cometkim `feat/qwen3.8-nvfp4full`) — 4 files: `package.h`, `package.cpp`, `bindings.cpp`, `variant.cpp`. Enables the cometkim full-NVFP4 27B profile on upstream master. Keep. |
-| `65bbf8b5` | tooling | DFlash2 graft tool `tools/artifact/graft_dflash2_w8.py` + fork notes + sanitized serving example — builds DFlash2-capable artifacts (see the HF model card), no engine changes. Keep. |
-| `71b4c9b2` | engine (temp) | OpenAI Responses: accept `include=reasoning.encrypted_content` + `reasoning.summary` (cherry-pick of upstream PR #148, `193dab17`). Drop when #148 merges. |
-| `bcc6261e` | engine (temp) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn; ours, derived from #148 which only handled the create side). Drop when #148 lands + upstream covers the input side. |
-| `e202c53b` | build (temp) | ccache + BuildKit cache mount for incremental docker builds (port of upstream PR #97, `03df31d5`). Drop when #97 merges. |
-| `7e8ad2e9` | engine (temp) | NVFP4 TMA route reads activation scales tile-contiguous (port of upstream PR #160, `545f64b0`; +1–2.5% prefill on our box). Drop when #160 merges. |
-| `4ac61fa2` | engine (temp) | `--image-token-budget N` per-image Vision-token ceiling + our validator fix (port of upstream PR #61, `eb413c76`). Drop when #61 merges. |
-| `6e9e928a` | docs | patch registry + fork policy (`PATCHES.md`). |
-| `8a42a465` | build | curl in the runtime image (container healthcheck support). |
+| `50e04987` | tooling | DFlash2 graft tool `tools/artifact/graft_dflash2_w8.py` + fork notes + sanitized serving example — builds DFlash2-capable artifacts (see the HF model card), no engine changes. Keep. |
+| `9dcdce39` | engine (temp) | OpenAI Responses: accept `include=reasoning.encrypted_content` + `reasoning.summary` (cherry-pick of upstream PR #148, `193dab17`). Drop when #148 merges. |
+| `25de38a5` | engine (temp) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn; ours, derived from #148 which only handled the create side). Drop when #148 lands + upstream covers the input side. |
+| `3ca1a001` | build (temp) | ccache + BuildKit cache mount for incremental docker builds (port of upstream PR #97, `03df31d5`). Drop when #97 merges. |
+| `f26621be` | engine (temp) | `--image-token-budget N` per-image Vision-token ceiling (port of upstream PR #61, `eb413c76`), re-anchored onto v3's `processor_options`/`FrontendOptions` chain. Drop when #61 merges. |
+| `cba96bcc` | build | curl in the runtime image (container healthcheck support). |
+| `775f1e0b` | docs | patch registry + fork policy (`PATCHES.md`). |
+| `3550b95f` | docs | `FORK.md` carried-commit delta. |
+| *(tools)* | tooling (temp) | `tools/upgrade_ninfer_v2_to_v3.py`: allow-list `qwen3.8-27b/nvfp4full` so our artifact upgrades to a v3 container. Drop when upstream registers `nvfp4full`. |
 
-Everything else is byte-identical to upstream `487f8977` (verify: `git log
+Everything else is byte-identical to upstream `f76e19c0` (verify: `git log
 origin/master..main` should show only the commits above).
 
 ## Graft tool
