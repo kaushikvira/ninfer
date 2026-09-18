@@ -40,6 +40,13 @@ KNOWN_COUNTS = {
     ("qwen3.8-27b", "groupwise-int"): (1124, 1190),
     ("qwen3.8-27b", "nvfp4"): (1124, 1190),
     ("qwen3.6-35b-a3b", "groupwise-int"): (940,),
+    # FORK-LOCAL (kaushikvira): cometkim qwen3.8-27b/nvfp4full weights —
+    # 1259 plain, 1325 with the DFlash2 graft (tools/artifact/graft_dflash2_w8.py).
+    # Every format/layout used by that artifact is already in the official tables
+    # below and all structural validation passes unchanged; verified on-box
+    # 2026-09-18 (needle 12/12, gate decode 162.5 tok/s vs 159.8 v2 baseline).
+    # Drop this entry when upstream registers nvfp4full.
+    ("qwen3.8-27b", "nvfp4full"): (1259, 1325),
 }
 LIMIT = 32_000_000_000
 HEADER = struct.Struct("<8sQ16s")

@@ -16,21 +16,33 @@ This fork exists to *ship* what upstream hasn't merged yet, not to diverge:
 - **Never drift**: no big rewrites, no third-party infra, no vendor lock-in.
   If we need something upstream rejects, keep it minimal and documented here.
 
-## Carried commits (as of 2026-09-15)
+## Carried commits (as of 2026-09-18 — rebased onto v3 `f76e19c0`)
 
-This fork = upstream `Neroued/ninfer` master (`487f8977`) + the commits below.
+This fork = upstream `Neroued/ninfer` master (`f76e19c0`, v3 model/weight
+decoupling) + the commits below. The v3 rebase **dropped two carried commits**:
+the C++ `nvfp4full` weights-profile registration (v3's loader is data-driven —
+the enum/binder became dead code) and the PR #160 tile-contiguous scales port
+(superseded by upstream `1d8587bc`). `nvfp4full` now lives entirely in the
+artifact, upgraded to a v3 container with the extended `tools/upgrade_ninfer_v2_to_v3.py`
+(see below) — no engine fork needed for it.
 
 | Local commit | Source | Upstream PR | What | Drop trigger |
 |---|---|---|---|---|
-| `2eb59dbc` | **our own (engine)** | — (proposal upstream-worthy) | register `qwen3.8-27b/nvfp4full` weights profile (4-file port of cometkim `feat/qwen3.8-nvfp4full` — Fused nvfp4full binder for the cometkim artifact; upstream only has groupwise-int + nvfp4) | When upstream adds `nvfp4full` (none open; PR #107 covers only Ostrfella profile) |
-| `65bbf8b5` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
-| `71b4c9b2` | cherry-pick `193dab17` | **#148** (Sha1rholder) | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #148 merges |
-| `bcc6261e` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #148 lands + re-diff; then only if upstream adds the input-side handling |
-| `e202c53b` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
-| `7e8ad2e9` | cherry-pick `545f64b0` | **#160** (MichaelDementii) | NVFP4 TMA route reads activation scales tile-contiguous (prefill +1-2.5% on our box) | When #160 merges |
-| `4ac61fa2` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling + **our validator fix** (allow policy-lowered `image_max_pixels`) | When #61 merges (verify our validator hunk is included; we posted it as a comment) |
-| `8a42a465` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
-| `6e9e928a` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
+| `50e04987` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
+| `9dcdce39` | cherry-pick `193dab17` | **#148** (Sha1rholder) | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #148 merges |
+| `25de38a5` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #148 lands + re-diff |
+| `3ca1a001` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
+| `f26621be` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling (re-anchored onto v3's `processor_options`/`FrontendOptions` chain). Our original validator fix became moot — v3 dropped the strict registered-pixel-bounds check. | When #61 merges |
+| `cba96bcc` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
+| `775f1e0b` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
+| `3550b95f` | **our own (docs)** | — | `FORK.md` carried-commit delta | Keep (docs) |
+| *(this commit)* | **our own (tools)** | — | `tools/upgrade_ninfer_v2_to_v3.py`: add `qwen3.8-27b/nvfp4full` to `KNOWN_COUNTS` (1259 plain / 1325 with DFlash2 graft) so our artifact upgrades to a v3 container with weight bytes preserved | When upstream registers `nvfp4full` (then the entry is upstream) |
+
+**Serving note (v3 cutover, 2026-09-18):** the on-box artifact was upgraded to
+`qwen3_8_27b_nvfp4full-dflash2.v3.ninfer` (+289 KB metadata, same 18.7 GiB
+device footprint). Gate on the rebased build: needle 12/12, tool 10/10, decode
+**162.5 tok/s** (baseline `default.json` re-saved to v3 numbers; first cold-start
+probe read 141 and settled at 162.5). Profile: `bench/configs/ninfer-nvfp4full-dflash2-v3.cfg`.
 
 ## How to re-sync after an upstream merge
 
