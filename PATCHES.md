@@ -16,27 +16,34 @@ This fork exists to *ship* what upstream hasn't merged yet, not to diverge:
 - **Never drift**: no big rewrites, no third-party infra, no vendor lock-in.
   If we need something upstream rejects, keep it minimal and documented here.
 
-## Carried commits (as of 2026-09-18 — rebased onto v3 `f76e19c0`)
+## Carried commits (as of 2026-09-24 — rebased onto `bace20dc`)
 
-This fork = upstream `Neroued/ninfer` master (`f76e19c0`, v3 model/weight
-decoupling) + the commits below. The v3 rebase **dropped two carried commits**:
-the C++ `nvfp4full` weights-profile registration (v3's loader is data-driven —
-the enum/binder became dead code) and the PR #160 tile-contiguous scales port
-(superseded by upstream `1d8587bc`). `nvfp4full` now lives entirely in the
-artifact, upgraded to a v3 container with the extended `tools/upgrade_ninfer_v2_to_v3.py`
-(see below) — no engine fork needed for it.
+This fork = upstream `Neroued/ninfer` master (`bace20dc`, incl. the silu
+accuracy fix `c4ae8a9c`) + the commits below. The 2026-09-24 rebase added
+the five `port/2026-09-21-six-prs` ports (#297 #274 #299 #264 #268, A/B'd on
+that branch) plus two new ports (#309 #305). #309 conflicted with our #299
+port in `tool_call_parser.cpp` and was merged by hand: #309's candidate
+marker loop keeps #299's `duplicate_parameters_repaired` capture (the parser
+is loop-scoped, so the flag is captured on the winning parse).
 
 | Local commit | Source | Upstream PR | What | Drop trigger |
 |---|---|---|---|---|
-| `50e04987` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
-| `9dcdce39` | cherry-pick `193dab17` | **#148** (Sha1rholder) | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #148 merges |
-| `25de38a5` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #148 lands + re-diff |
-| `3ca1a001` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
-| `f26621be` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling (re-anchored onto v3's `processor_options`/`FrontendOptions` chain). Our original validator fix became moot — v3 dropped the strict registered-pixel-bounds check. | When #61 merges |
-| `cba96bcc` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
-| `775f1e0b` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
-| `3550b95f` | **our own (docs)** | — | `FORK.md` carried-commit delta | Keep (docs) |
-| *(this commit)* | **our own (tools)** | — | `tools/upgrade_ninfer_v2_to_v3.py`: add `qwen3.8-27b/nvfp4full` to `KNOWN_COUNTS` (1259 plain / 1325 with DFlash2 graft) so our artifact upgrades to a v3 container with weight bytes preserved | When upstream registers `nvfp4full` (then the entry is upstream) |
+| `f8c5bd3b` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
+| `8af0e5f7` | cherry-pick `193dab17` | **#148** (Sha1rholder) → re-based as **#295** | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #295 (rebase of #148) merges — adopt #295, then re-diff the next row against it |
+| `40652a3a` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #148 lands + re-diff |
+| `ac0b55d1` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
+| `c4114051` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling (re-anchored onto v3's `processor_options`/`FrontendOptions` chain). Our original validator fix became moot — v3 dropped the strict registered-pixel-bounds check. | When #61 merges |
+| `fb7a631a` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
+| `036f3621` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
+| `78054dab` | **our own (docs)** | — | `FORK.md` carried-commit delta | Keep (docs) |
+| `3a8401ef` | **our own (tools)** | — | `tools/upgrade_ninfer_v2_to_v3.py`: add `qwen3.8-27b/nvfp4full` to `KNOWN_COUNTS` (1259 plain / 1325 with DFlash2 graft) so our artifact upgrades to a v3 container with weight bytes preserved | When upstream registers `nvfp4full` (then the entry is upstream) |
+| `df34f428` | cherry-pick | **#297** | fix(core): preserve workspace layout state after allocation overflow | When #297 merges |
+| `458d06eb` | cherry-pick | **#274** | fix(runtime): default shared-prefix catalog sized for one request's full candidate set (7 candidates > old `max(concurrency,4)` default — the eviction bug behind our `--max-shared-prefixes 16` cfg workaround) | When #274 merges |
+| `c8a1aac0` | cherry-pick | **#299** | fix(frontend): keep the last value on a duplicate tool-call parameter (`duplicate_parameters_repaired` diagnostic) | When #299 merges |
+| `0e6fa957` | cherry-pick | **#264** | perf(nvfp4): fused SwiGLU TMA route takes a partial last M tile (ragged widths stop falling back to linear + silu_mul) | When #264 merges |
+| `05a98aeb` | cherry-pick | **#268** | perf(attention): fold the sigmoid gate into the causal reduce epilogue (one graph node instead of two) | When #268 merges |
+| `81feb389` | cherry-pick `-x`, **conflict resolved by hand** | **#309** | fix(frontend): keep quoted `</think>` closes and later `<tool_call>` markers (candidate marker loop). Merged with our #299 port — see note above | When #309 merges (re-check the #299 merge if #299 lands first) |
+| `3b1c42f5` | cherry-pick `-x` | **#305** | perf(ops): fuse attention RMSNorm + NVFP4 activation quant on the T≥1024 TMA route (our prefill chunk is 4096 — hits our path) | When #305 merges |
 
 **Serving note (v3 cutover, 2026-09-18):** the on-box artifact was upgraded to
 `qwen3_8_27b_nvfp4full-dflash2.v3.ninfer` (+289 KB metadata, same 18.7 GiB
@@ -68,3 +75,21 @@ verify the engine boots with the base cfg unchanged.
   don't send prompt_cache_breakpoint; our clients do — low value here.
 - **#195/#107/#183/#197/#163/#162/#54/#84/#59** — not applicable (no corresponding profile /
   Windows / metadata conveniences).
+
+### Reviewed 2026-09-24, not taken
+
+- **#300** RFC agent-workload bundle (+10% dflash2 agent): explicitly "not for merge"; bundles
+  #177/#178/#179/#208/#251 context-cache fixes — revisit once upstream stabilizes the pieces.
+- **#311/#292** Q4/Q5 K-split routes: not our quant (we are NVFP4); target MTP3 groupwise serving.
+- **#284** Q6 gate/up: not our quant.
+- **#286–290** NVFP4 sparse-MoE series: Qwen3.8-27B is dense.
+- **#307** logprobs logsumexp: we never request logprobs.
+- **#304** speed-of-light bench estimator: offline tooling, no engine surface (revisit for A/B analysis).
+- **#282** GGUF conversion source: not our conversion path (cometkim nvfp4full + graft).
+- **#235** CUDA 12.9 floor: we build on 13.1.
+- **#221** MTP draft >5 startup failure: we run DFlash2 K=7; MTP fallback profile is K=4 (below the limit).
+- **#294** XGrammar structured output: not maintainer-pre-approved, vendors a grammar lib; we don't use
+  `response_format` (tool calls go through the #309 parser).
+- **#199** sparse-MoE Q4 quads: MoE.
+- **#295** (rebase of #148): we already carry the feature (rows above) — adopt #295 *instead* of our
+  two #148-derived commits when it merges, then re-diff.
