@@ -626,7 +626,7 @@ ParsedToolCallOutput parse_qwen_tool_call_output(const std::string& text,
     bool duplicate_repaired      = false;
     while (candidate != std::string::npos) {
         std::vector<RawToolCall> calls;
-        const QwenToolRegionParser parser(source.substr(candidate), max_tool_name_length, contract);
+        QwenToolRegionParser parser(source.substr(candidate), max_tool_name_length, contract);
         const FallbackReason failure = parser.parse(calls);
         if (failure == FallbackReason::None) {
             accepted  = candidate;
