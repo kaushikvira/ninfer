@@ -7,6 +7,25 @@ upstream has no equivalent. Also mirrored on branch `contrib/nvfp4full-build`
 (push it after rebases) and in the serving repo
 (`v-llm-gateway/bench/build-swift-abliterated/`, `build-swift15/`).
 
+## Setup (one-time) + source download
+
+```bash
+# venv: torch cu130 (Blackwell sm_120) + llm-compressor stack
+python3 -m venv ~/venvs/qquant
+~/venvs/qquant/bin/pip install torch --index-url https://download.pytorch.org/whl/cu130
+~/venvs/qquant/bin/pip install llm-compressor transformers accelerate safetensors
+
+# BF16 source (any qwen3.5/3.8-27B-family checkpoint with 64L/5120/24x256/4kv, vocab 248320)
+hf download <org>/<model> --local-dir /home/kv/models/<name>-bf16
+# verify arch BEFORE spending GPU hours: num_hidden_layers 64, hidden 5120,
+# vocab 248320, max_position_embeddings 262144, linear dims 16/128/48/128
+```
+
+GPU protocol (per v-llm-gateway AGENTS.md): `systemctl stop ninfer-watchdog`
+→ `make down` → quantize (~17 min incl. save) → bring prod back up → do the
+CPU steps (normalize + convert) while prod serves → swap only after the gate
+passes. Never leave the box down; watchdog guards the prod profile.
+
 ## Pipeline (BF16 source -> published .ninfer)
 
 ```bash
