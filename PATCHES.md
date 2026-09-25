@@ -16,6 +16,19 @@ This fork exists to *ship* what upstream hasn't merged yet, not to diverge:
 - **Never drift**: no big rewrites, no third-party infra, no vendor lock-in.
   If we need something upstream rejects, keep it minimal and documented here.
 
+## Never-drop files (survive rebases)
+
+- `tools/convert/nvfp4full-build/` — all-NVFP4 artifact build pipeline
+  (quantize_all_nvfp4.py, normalize_groups.py, recipe_swift_full.py,
+  nvfp4full_qconfig.json, README with full runbook). Upstream has no
+  equivalent; it produced both published kaushikvira v3 artifacts
+  (swift-abliterated 74c97213…, swift15 16f313c0…). On every rebase:
+  `git log origin/master..main -- tools/convert/nvfp4full-build/` must be
+  non-empty-of-commits i.e. the directory still exists, and re-push the
+  backup branch: `git push -f gh main:contrib/nvfp4full-build`.
+  (Lost-file precedent: `tools/convert/qwen3_8_27b/dflash2_recipe.py` was
+  dropped during the 2026-09-16 squash-rebase — don't repeat that.)
+
 ## Carried commits (as of 2026-09-24 — rebased onto `bace20dc`)
 
 This fork = upstream `Neroued/ninfer` master (`bace20dc`, incl. the silu
