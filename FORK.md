@@ -24,16 +24,25 @@ vision, host-KV 32 GiB, sampling defaults; **no secrets**):
 
 ## Carried commits vs upstream (`main` here)
 
-| Commit | Type | What |
-|---|---|---|
-| `50e04987` | tooling | DFlash2 graft tool `tools/artifact/graft_dflash2_w8.py` + fork notes + sanitized serving example — builds DFlash2-capable artifacts (see the HF model card), no engine changes. Keep. |
-| `9dcdce39` | engine (temp) | OpenAI Responses: accept `include=reasoning.encrypted_content` + `reasoning.summary` (cherry-pick of upstream PR #148, `193dab17`). Drop when #148 merges. |
-| `25de38a5` | engine (temp) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn; ours, derived from #148 which only handled the create side). Drop when #148 lands + upstream covers the input side. |
-| `3ca1a001` | build (temp) | ccache + BuildKit cache mount for incremental docker builds (port of upstream PR #97, `03df31d5`). Drop when #97 merges. |
-| `f26621be` | engine (temp) | `--image-token-budget N` per-image Vision-token ceiling (port of upstream PR #61, `eb413c76`), re-anchored onto v3's `processor_options`/`FrontendOptions` chain. Drop when #61 merges. |
-| `cba96bcc` | build | curl in the runtime image (container healthcheck support). |
-| `775f1e0b` | docs | patch registry + fork policy (`PATCHES.md`). |
-| `3550b95f` | docs | `FORK.md` carried-commit delta. |
+SHAs live in [`PATCHES.md`](PATCHES.md) (this table is deliberately SHA-free —
+they rotate on every rebase; `git log origin/master..main` is the truth).
+
+| Type | What |
+|---|---|
+| tooling | DFlash2 graft tool `tools/artifact/graft_dflash2_w8.py` + fork notes + sanitized serving example — builds DFlash2-capable artifacts (see the HF model card), no engine changes. Keep. |
+| tooling | `tools/convert/nvfp4full-build/` all-NVFP4 artifact pipeline (never-drop — see `PATCHES.md`) + its runbook/venv-bootstrap docs. Keep. |
+| tooling | `tools/upgrade_ninfer_v2_to_v3.py` allow-lists `qwen3.8-27b/nvfp4full` so our artifact upgrades to a v3 container. Drop when upstream registers `nvfp4full`. |
+| engine (temp) | OpenAI Responses: accept `include=reasoning.encrypted_content` + `reasoning.summary` (cherry-pick of upstream PR #148, `193dab17`). #148 closed unmerged — successor #295; drop when #295 merges. |
+| engine (temp) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn; ours, derived from #148 which only handled the create side). Drop when #295 lands + upstream covers the input side. |
+| build (temp) | ccache + BuildKit cache mount for incremental docker builds (port of upstream PR #97). Drop when #97 merges. |
+| engine (temp) | `--image-token-budget N` per-image Vision-token ceiling (port of upstream PR #61), re-anchored onto v3's `processor_options`/`FrontendOptions` chain. Drop when #61 merges. |
+| build | curl in the runtime image (container healthcheck support). |
+| engine (temp) | #297 port — fix(core): preserve workspace layout state after allocation overflow. |
+| engine (temp) | #274 port — fix(runtime): default shared-prefix catalog sized for a request's full candidate set. |
+| engine (temp) | #299 port — fix(frontend): keep the last value on a duplicate tool-call parameter. |
+| engine (temp) | #268 port — perf(attention): fold the sigmoid gate into the causal reduce epilogue. |
+| engine (temp) | #309 port — fix(frontend): keep quoted reasoning closes and later tool-call markers (merged by hand with the #299 port). |
+| docs | patch registry + fork policy (`PATCHES.md`), `FORK.md` delta, rebase records. |
 | *(tools)* | tooling (temp) | `tools/upgrade_ninfer_v2_to_v3.py`: allow-list `qwen3.8-27b/nvfp4full` so our artifact upgrades to a v3 container. Drop when upstream registers `nvfp4full`. |
 
 Everything else is byte-identical to upstream `e31bc99b` (verify: `git log
