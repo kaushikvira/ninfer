@@ -16,7 +16,41 @@ This fork exists to *ship* what upstream hasn't merged yet, not to diverge:
 - **Never drift**: no big rewrites, no third-party infra, no vendor lock-in.
   If we need something upstream rejects, keep it minimal and documented here.
 
-## Carried commits (as of 2026-09-24 — rebased onto `bace20dc`)
+## Never-drop files (survive rebases)
+
+- `tools/convert/nvfp4full-build/` — all-NVFP4 artifact build pipeline
+  (quantize_all_nvfp4.py, normalize_groups.py, recipe_swift_full.py,
+  nvfp4full_qconfig.json, README with full runbook). Upstream has no
+  equivalent; it produced both published kaushikvira v3 artifacts
+  (swift-abliterated 74c97213…, swift15 16f313c0…). On every rebase:
+  `git log origin/master..main -- tools/convert/nvfp4full-build/` must be
+  non-empty-of-commits i.e. the directory still exists, and re-push the
+  backup branch: `git push -f gh main:contrib/nvfp4full-build`.
+  (Lost-file precedent: `tools/convert/qwen3_8_27b/dflash2_recipe.py` was
+  dropped during the 2026-09-16 squash-rebase — don't repeat that.)
+
+## Rebase record 2026-09-26 — onto `e31bc99b` (template unification)
+
+Upstream landed the linear-ops template unification (q4–q8/fp8/nvfp4/bf16 a16_mma
++ sliced_k_mma + TMA routes), KDA (Kimi delta attention), and the GDN two-stage
+rewrite. **Two carried commits dropped:**
+
+- `0e6fa957` (port of **#264**, SwiGLU partial last M tile) — superseded:
+  master's `fc3993d8` routes swiglu `tokens >= 256` through the shared
+  `launch_nvfp4_a4_tma_mma` kernel with `div_up` grids. #264 itself is still
+  open but now proposes only the narrower 512 ragged floor on top.
+- `3b1c42f5` (cherry-pick of #305 head `1f2ab4b5`, RMSNorm+NVFP4 quant fusion) —
+  **#305 closed unmerged 2026-09-25 as a recorded falsified direction**:
+  author's SoL math + stage measurements show ~5% at stage level but ~0.04%
+  end-to-end prefill (compute-bound), and eligibility (`tokens >= 1024`) meant
+  it never ran at decode. Re-port would have cost a full w4a4→a4 API rename.
+
+Also noted: #148 closed unmerged — successor is #295 (Macasacker); keep our
+`8af0e5f7` + `40652a3a` until #295 merges. #309 (quoted reasoning closes)
+closed unmerged with no comments — still carrying `81feb389` + `3090a5b1`
+(functional tool-call fix; re-evaluate if #318 lands).
+
+## Carried commits (as of 2026-09-26 — rebased onto `e31bc99b`)
 
 This fork = upstream `Neroued/ninfer` master (`bace20dc`, incl. the silu
 accuracy fix `c4ae8a9c`) + the commits below. The 2026-09-24 rebase added
