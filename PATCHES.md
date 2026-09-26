@@ -52,13 +52,23 @@ closed unmerged with no comments — still carrying `81feb389` + `3090a5b1`
 
 ## Carried commits (as of 2026-09-26 — rebased onto `e31bc99b`)
 
-This fork = upstream `Neroued/ninfer` master (`bace20dc`, incl. the silu
-accuracy fix `c4ae8a9c`) + the commits below. The 2026-09-24 rebase added
-the five `port/2026-09-21-six-prs` ports (#297 #274 #299 #264 #268, A/B'd on
-that branch) plus two new ports (#309 #305). #309 conflicted with our #299
-port in `tool_call_parser.cpp` and was merged by hand: #309's candidate
-marker loop keeps #299's `duplicate_parameters_repaired` capture (the parser
-is loop-scoped, so the flag is captured on the winning parse).
+This fork = upstream `Neroued/ninfer` master (`e31bc99b`, the 2026-09-26
+linear-ops template unification + KDA + GDN two-stage, incl. the silu accuracy
+fix `c4ae8a9c`) + the commits below. The 2026-09-24 rebase added the five
+`port/2026-09-21-six-prs` ports (#297 #274 #299 #264 #268, A/B'd on that
+branch) plus two ports (#309 #305). #309 conflicted with our #299 port in
+`tool_call_parser.cpp` and was merged by hand: #309's candidate marker loop
+keeps #299's `duplicate_parameters_repaired` capture (the parser is
+loop-scoped, so the flag is captured on the winning parse).
+
+**2026-09-26 rebase dropped two of those ports** — `0e6fa957` (#264,
+superseded by upstream's shared-kernel swiglu route) and `3b1c42f5` (#305
+closed as a falsified direction). The e31bc99b build is perf-flat vs
+bace20dc on our serving mix but fails the extended needle ladder
+(empty response at 128k chars/depth 0.9, twice; rollback passes 15/15 —
+record: v-llm-gateway `docs/NINFER_A_B.md` 2026-09-26). Prod image stays on
+the bace20dc build until upstream fixes it; candidate kept as Docker tag
+`ninfer-master:e31bc99b-candidate`.
 
 | Local commit | Source | Upstream PR | What | Drop trigger |
 |---|---|---|---|---|
