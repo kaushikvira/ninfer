@@ -1,6 +1,7 @@
 # Fork notes — kaushikvira/ninfer
 
-This fork is **upstream `Neroued/ninfer` master `f76e19c0` (v3 model/weight
+This fork is **upstream `Neroued/ninfer` master `e31bc99b` (2026-09-26 rebase —
+linear-ops template unification, KDA, GDN two-stage; v3 model/weight
 decoupling) + the carried commits below** (temporary upstream-PR ports that get
 dropped when they merge, plus tooling/docs). The authoritative registry with
 sources and drop triggers is [`PATCHES.md`](PATCHES.md).
@@ -35,7 +36,7 @@ vision, host-KV 32 GiB, sampling defaults; **no secrets**):
 | `3550b95f` | docs | `FORK.md` carried-commit delta. |
 | *(tools)* | tooling (temp) | `tools/upgrade_ninfer_v2_to_v3.py`: allow-list `qwen3.8-27b/nvfp4full` so our artifact upgrades to a v3 container. Drop when upstream registers `nvfp4full`. |
 
-Everything else is byte-identical to upstream `f76e19c0` (verify: `git log
+Everything else is byte-identical to upstream `e31bc99b` (verify: `git log
 origin/master..main` should show only the commits above).
 
 ## Graft tool
