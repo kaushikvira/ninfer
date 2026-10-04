@@ -162,3 +162,27 @@ verify the engine boots with the base cfg unchanged.
 - **#199** sparse-MoE Q4 quads: MoE.
 - **#295** (rebase of #148): we already carry the feature (rows above) — adopt #295 *instead* of our
   two #148-derived commits when it merges, then re-diff.
+
+## Adopted 2026-10-05 — upstream PR #355 (nvfp4 tiled split-KV prefill)
+
+Merged **onto the 335 prod branch** (fork branch `ab/pr-355-nvfp4-tiled-prefill`, image
+`ninfer-master:local` = 0c04775050e1), **not** onto `main`. PR head = 8 commits over the
+335 base (`d44ab584` + hybrid prefix cache): three launch-plan SM-count refactors
+(`a667efdd` rope, `417eb3d6` norm/moe, `e621c7d6` attention), publication-streams
+(`064965c7`), wait-for-compute (`75a89050` — dropped, targets `start_request` which the
+335 branch removed), shared tiled KV-split helper (`dee40e0c`), mxfp8 route
+(`7bf80a2e`), and the nvfp4 tiled split-KV perf change (`6c7df931`).
+
+Merge collateral (v-llm-gateway `docs/NINFER_A_B.md` 2026-10-05):
+- gate folded back to the caller (`sigmoid_mul` after the op — our 335 branch had folded it
+  into `causal_softmax_attention`; guarded against double/zero application).
+- `start_request`/abort kept per the 335 hybrid model (upstream's variants target removed code).
+- `KVAddressSpaceStore::activate` in `hybrid_program.cpp` ported to the new stream parameter
+  (was the only compile fix needed).
+- Attention area byte-identical to PR head (`git diff pr-355` empty on
+  `src/ops/softmax_attention/`).
+
+A/B (same artifact/cfg, cold back-to-back): prefill-200k 3067→3244 t/s (+5.8%), 100k +3.4%,
+decode flat, gate PASS. To carry onto a future `main` rebase or drop: PR #355 is still open
+upstream — when it merges upstream, the 8 commits collapse into upstream history and the merge
+branch is superseded. Rollback image `ninfer-master:prod-fdac5cd6` / `335-candidate`.
