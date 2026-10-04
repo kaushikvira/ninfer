@@ -72,22 +72,22 @@ the bace20dc build until upstream fixes it; candidate kept as Docker tag
 
 | Local commit | Source | Upstream PR | What | Drop trigger |
 |---|---|---|---|---|
-| `f8c5bd3b` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
-| `8af0e5f7` | cherry-pick `193dab17` | **#148** (Sha1rholder) → re-based as **#295** | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #295 (rebase of #148) merges — adopt #295, then re-diff the next row against it |
-| `40652a3a` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #148 lands + re-diff |
-| `ac0b55d1` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
-| `c4114051` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling (re-anchored onto v3's `processor_options`/`FrontendOptions` chain). Our original validator fix became moot — v3 dropped the strict registered-pixel-bounds check. | When #61 merges |
-| `fb7a631a` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
-| `036f3621` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
-| `78054dab` | **our own (docs)** | — | `FORK.md` carried-commit delta | Keep (docs) |
-| `3a8401ef` | **our own (tools)** | — | `tools/upgrade_ninfer_v2_to_v3.py`: add `qwen3.8-27b/nvfp4full` to `KNOWN_COUNTS` (1259 plain / 1325 with DFlash2 graft) so our artifact upgrades to a v3 container with weight bytes preserved | When upstream registers `nvfp4full` (then the entry is upstream) |
-| `df34f428` | cherry-pick | **#297** | fix(core): preserve workspace layout state after allocation overflow | When #297 merges |
-| `458d06eb` | cherry-pick | **#274** | fix(runtime): default shared-prefix catalog sized for one request's full candidate set (7 candidates > old `max(concurrency,4)` default — the eviction bug behind our `--max-shared-prefixes 16` cfg workaround) | When #274 merges |
-| `c8a1aac0` | cherry-pick | **#299** | fix(frontend): keep the last value on a duplicate tool-call parameter (`duplicate_parameters_repaired` diagnostic) | When #299 merges |
-| `0e6fa957` | cherry-pick | **#264** | perf(nvfp4): fused SwiGLU TMA route takes a partial last M tile (ragged widths stop falling back to linear + silu_mul) | When #264 merges |
-| `05a98aeb` | cherry-pick | **#268** | perf(attention): fold the sigmoid gate into the causal reduce epilogue (one graph node instead of two) | When #268 merges |
-| `81feb389` | cherry-pick `-x`, **conflict resolved by hand** | **#309** | fix(frontend): keep quoted `</think>` closes and later `<tool_call>` markers (candidate marker loop). Merged with our #299 port — see note above | When #309 merges (re-check the #299 merge if #299 lands first) |
-| `3b1c42f5` | cherry-pick `-x` | **#305** | perf(ops): fuse attention RMSNorm + NVFP4 activation quant on the T≥1024 TMA route (our prefill chunk is 4096 — hits our path) | When #305 merges |
+| `5914c508` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
+| `f6631095` | cherry-pick `193dab17` | **#148** (Sha1rholder) → re-based as **#295** | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #295 (rebase of #148; #148 itself closed unmerged 2026-09-20) merges — adopt #295, then re-diff the next row against it |
+| `4570a5e8` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #295 lands + re-diff |
+| `c58afd60` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
+| `8a6aace9` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling (re-anchored onto v3's `processor_options`/`FrontendOptions` chain). Our original validator fix became moot — v3 dropped the strict registered-pixel-bounds check. | When #61 merges |
+| `e35edc42` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
+| `4086de08` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
+| `897f5b9e` | **our own (docs)** | — | `FORK.md` carried-commit delta | Keep (docs) |
+| `12309063` | **our own (tools)** | — | `tools/upgrade_ninfer_v2_to_v3.py`: add `qwen3.8-27b/nvfp4full` to `KNOWN_COUNTS` (1259 plain / 1325 with DFlash2 graft) so our artifact upgrades to a v3 container with weight bytes preserved | When upstream registers `nvfp4full` (then the entry is upstream) |
+| `6e5b12a8` | cherry-pick | **#297** | fix(core): preserve workspace layout state after allocation overflow | When #297 merges |
+| `d0484006` | cherry-pick | **#274** | fix(runtime): default shared-prefix catalog sized for one request's full candidate set (7 candidates > old `max(concurrency,4)` default — the eviction bug behind our `--max-shared-prefixes 16` cfg workaround) | When #274 merges |
+| `2b6a964d` | cherry-pick | **#299** | fix(frontend): keep the last value on a duplicate tool-call parameter (`duplicate_parameters_repaired` diagnostic) | When #299 merges |
+| `5267df22` | cherry-pick | **#268** | perf(attention): fold the sigmoid gate into the causal reduce epilogue (one graph node instead of two) | When #268 merges |
+| `8e294ca5` | cherry-pick `-x`, **conflict resolved by hand** | **#309** | fix(frontend): keep quoted `</think>` closes and later `<tool_call>` markers (candidate marker loop). Merged with our #299 port — see note above | When #309 merges (re-check the #299 merge if #299 lands first; #309 closed unmerged 2026-09-25 with no comments — re-evaluate against #318) |
+
+*(SHA column = post-2026-09-26-rebase SHAs. The dropped `0e6fa957` #264 and `3b1c42f5` #305 rows are recorded in the rebase section above — no longer carried.)*
 
 **Serving note (v3 cutover, 2026-09-18):** the on-box artifact was upgraded to
 `qwen3_8_27b_nvfp4full-dflash2.v3.ninfer` (+289 KB metadata, same 18.7 GiB
