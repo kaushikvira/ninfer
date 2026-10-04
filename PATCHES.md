@@ -50,9 +50,33 @@ Also noted: #148 closed unmerged — successor is #295 (Macasacker); keep our
 closed unmerged with no comments — still carrying `81feb389` + `3090a5b1`
 (functional tool-call fix; re-evaluate if #318 lands).
 
-## Carried commits (as of 2026-09-26 — rebased onto `e31bc99b`)
+## Rebase record 2026-09-30 — onto `d44ab584` (attention reorg + fp8 linear tuning)
 
-This fork = upstream `Neroued/ninfer` master (`e31bc99b`, the 2026-09-26
+Upstream landed a 23-commit perf push: per-dtype causal-attention reorg
+(bf16/fp8/int8/k8v4/nvfp4 kernels split from the monolithic
+`prompt_*`/`small_t*` files into per-dtype dirs with shared
+`common/causal_*` primitives), split-kv fp8/k8v4 prefill, fp8 linear TMA
+tuning for qwen3.8 shapes, native nvfp4 a16 decode + fp8→bf16 conversion,
+DFlash per-chunk prefill-control binding (`4201b5d2`), and a configurable
+`--kv-dtype bf16|int8|fp8|nvfp4|k8v4` bench runner (`c1c48a6a`).
+
+**One carried commit re-landed by hand:** `15447ad7` (#268, sigmoid gate
+into the causal reduce epilogue) conflicted with the attention reorg — the
+shared BF16/INT8 small-T reducer it fused into no longer exists (each
+dtype now has its own reduce kernel). Re-landed in the standalone form:
+the gate is a `const Tensor*` on the public `causal_softmax_attention`
+API, applied by `sigmoid_mul` after the per-storage dispatch (bit-
+identical to the pre-fold behaviour; the ~1 µs/node fusion is deferred
+until a per-dtype epilogue exists to fold into). Bench gate extensions
+(`--gate off|standalone|fused`) dropped from the bench file in favour of
+upstream's `582c9a8f`/`909fb087` bench rework; gate coverage stays in the
+`causal_cache.cpp` oracle. No commits dropped; no PR ports merged into
+the delta (all direct upstream commits).
+
+## Carried commits (as of 2026-09-30 — rebased onto `d44ab584`)
+
+This fork = upstream `Neroued/ninfer` master (`d44ab584`, the 2026-09-27→29
+attention reorg + fp8 linear tuning, on top of `e31bc99b`), the 2026-09-26
 linear-ops template unification + KDA + GDN two-stage, incl. the silu accuracy
 fix `c4ae8a9c`) + the commits below. The 2026-09-24 rebase added the five
 `port/2026-09-21-six-prs` ports (#297 #274 #299 #264 #268, A/B'd on that
@@ -68,24 +92,25 @@ bace20dc on our serving mix but fails the extended needle ladder
 (empty response at 128k chars/depth 0.9, twice; rollback passes 15/15 —
 record: v-llm-gateway `docs/NINFER_A_B.md` 2026-09-26). Prod image stays on
 the bace20dc build until upstream fixes it; candidate kept as Docker tag
-`ninfer-master:e31bc99b-candidate`.
+`ninfer-master:e31bc99b-candidate`. The 2026-09-30 rebase onto `d44ab584`
+drops nothing; the new candidate is Docker tag `ninfer-master:d44ab584-candidate`.
 
 | Local commit | Source | Upstream PR | What | Drop trigger |
 |---|---|---|---|---|
-| `5914c508` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
-| `f6631095` | cherry-pick `193dab17` | **#148** (Sha1rholder) → re-based as **#295** | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #295 (rebase of #148; #148 itself closed unmerged 2026-09-20) merges — adopt #295, then re-diff the next row against it |
-| `4570a5e8` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #295 lands + re-diff |
-| `c58afd60` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
-| `8a6aace9` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling (re-anchored onto v3's `processor_options`/`FrontendOptions` chain). Our original validator fix became moot — v3 dropped the strict registered-pixel-bounds check. | When #61 merges |
-| `e35edc42` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
-| `4086de08` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
-| `897f5b9e` | **our own (docs)** | — | `FORK.md` carried-commit delta | Keep (docs) |
-| `12309063` | **our own (tools)** | — | `tools/upgrade_ninfer_v2_to_v3.py`: add `qwen3.8-27b/nvfp4full` to `KNOWN_COUNTS` (1259 plain / 1325 with DFlash2 graft) so our artifact upgrades to a v3 container with weight bytes preserved | When upstream registers `nvfp4full` (then the entry is upstream) |
-| `6e5b12a8` | cherry-pick | **#297** | fix(core): preserve workspace layout state after allocation overflow | When #297 merges |
-| `d0484006` | cherry-pick | **#274** | fix(runtime): default shared-prefix catalog sized for one request's full candidate set (7 candidates > old `max(concurrency,4)` default — the eviction bug behind our `--max-shared-prefixes 16` cfg workaround) | When #274 merges |
-| `2b6a964d` | cherry-pick | **#299** | fix(frontend): keep the last value on a duplicate tool-call parameter (`duplicate_parameters_repaired` diagnostic) | When #299 merges |
-| `5267df22` | cherry-pick | **#268** | perf(attention): fold the sigmoid gate into the causal reduce epilogue (one graph node instead of two) | When #268 merges |
-| `8e294ca5` | cherry-pick `-x`, **conflict resolved by hand** | **#309** | fix(frontend): keep quoted `</think>` closes and later `<tool_call>` markers (candidate marker loop). Merged with our #299 port — see note above | When #309 merges (re-check the #299 merge if #299 lands first; #309 closed unmerged 2026-09-25 with no comments — re-evaluate against #318) |
+| `465cff38` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
+| `6f75f6b8` | cherry-pick `193dab17` | **#148** (Sha1rholder) → re-based as **#295** | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #295 (rebase of #148; #148 itself closed unmerged 2026-09-20) merges — adopt #295, then re-diff the next row against it |
+| `422dc28f` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #295 lands + re-diff |
+| `c00499fe` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
+| `8ab2b38d` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling (re-anchored onto v3's `processor_options`/`FrontendOptions` chain). Our original validator fix became moot — v3 dropped the strict registered-pixel-bounds check. | When #61 merges |
+| `64a0995f` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
+| `14f81eec` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
+| `b70936cc` | **our own (docs)** | — | `FORK.md` carried-commit delta | Keep (docs) |
+| `da706aaa` | **our own (tools)** | — | `tools/upgrade_ninfer_v2_to_v3.py`: add `qwen3.8-27b/nvfp4full` to `KNOWN_COUNTS` (1259 plain / 1325 with DFlash2 graft) so our artifact upgrades to a v3 container with weight bytes preserved | When upstream registers `nvfp4full` (then the entry is upstream) |
+| `9f41b061` | cherry-pick | **#297** | fix(core): preserve workspace layout state after allocation overflow | When #297 merges |
+| `2e18151b` | cherry-pick | **#274** | fix(runtime): default shared-prefix catalog sized for one request's full candidate set (7 candidates > old `max(concurrency,4)` default — the eviction bug behind our `--max-shared-prefixes 16` cfg workaround) | When #274 merges |
+| `3c951b36` | cherry-pick | **#299** | fix(frontend): keep the last value on a duplicate tool-call parameter (`duplicate_parameters_repaired` diagnostic) | When #299 merges |
+| `15447ad7` | cherry-pick | **#268** | perf(attention): fold the sigmoid gate into the causal reduce epilogue (one graph node instead of two) | When #268 merges |
+| `7152abdd` | cherry-pick `-x`, **conflict resolved by hand** | **#309** | fix(frontend): keep quoted `</think>` closes and later `<tool_call>` markers (candidate marker loop). Merged with our #299 port — see note above | When #309 merges (re-check the #299 merge if #299 lands first; #309 closed unmerged 2026-09-25 with no comments — re-evaluate against #318) |
 
 *(SHA column = post-2026-09-26-rebase SHAs. The dropped `0e6fa957` #264 and `3b1c42f5` #305 rows are recorded in the rebase section above — no longer carried.)*
 

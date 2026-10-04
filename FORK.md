@@ -1,10 +1,11 @@
 # Fork notes — kaushikvira/ninfer
 
-This fork is **upstream `Neroued/ninfer` master `e31bc99b` (2026-09-26 rebase —
-linear-ops template unification, KDA, GDN two-stage; v3 model/weight
-decoupling) + the carried commits below** (temporary upstream-PR ports that get
-dropped when they merge, plus tooling/docs). The authoritative registry with
-sources and drop triggers is [`PATCHES.md`](PATCHES.md).
+This fork is **upstream `Neroued/ninfer` master `d44ab584` (2026-09-30 rebase —
+per-dtype causal-attention reorg + fp8 linear TMA tuning + configurable
+`--kv-dtype` bench runner, on top of the 2026-09-26 `e31bc99b` linear-ops /
+KDA / GDN two-stage) + the carried commits below** (temporary upstream-PR ports
+that get dropped when they merge, plus tooling/docs). The authoritative registry
+with sources and drop triggers is [`PATCHES.md`](PATCHES.md).
 
 > **v3 rebase note (2026-09-18):** rebasing onto upstream v3 dropped two carried
 > commits. The C++ `nvfp4full` weights-profile registration (`2eb59dbc`) is now
@@ -45,7 +46,7 @@ they rotate on every rebase; `git log origin/master..main` is the truth).
 | docs | patch registry + fork policy (`PATCHES.md`), `FORK.md` delta, rebase records. |
 | *(tools)* | tooling (temp) | `tools/upgrade_ninfer_v2_to_v3.py`: allow-list `qwen3.8-27b/nvfp4full` so our artifact upgrades to a v3 container. Drop when upstream registers `nvfp4full`. |
 
-Everything else is byte-identical to upstream `e31bc99b` (verify: `git log
+Everything else is byte-identical to upstream `d44ab584` (verify: `git log
 origin/master..main` should show only the commits above).
 
 ## Graft tool
