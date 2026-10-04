@@ -50,6 +50,23 @@ Also noted: #148 closed unmerged — successor is #295 (Macasacker); keep our
 closed unmerged with no comments — still carrying `81feb389` + `3090a5b1`
 (functional tool-call fix; re-evaluate if #318 lands).
 
+## Sync record 2026-10-04 — PR heads re-checked, 3 ports updated (base unchanged: `d44ab584`)
+
+Upstream master unchanged (`d44ab584` — none of the carried PRs merged). All 8 carried
+PR branches re-fetched; 5 heads identical to what we ported (#61 `eb413c76`, #268
+`2961dac6`, #274 `0f5f96f4`, #299 `d3a44d21`, #309 `71304581`). Three were stale and
+updated on branch `kv/pr-sync`:
+
+- **#97** grew 1→7 content commits: pulled `ec1efc4b..bc3a8633` (config-invalidation fix
+  `9d89a654` + bounded config trees `bc3a8633` + build-cache docs). Branch-sync merge
+  `c0392a3b` skipped (content already in master).
+- **#297** force-pushed: author rewrote the fix as a minimal cursor-ordering change
+  (`6d72167c`, Sep 27) replacing the original restructure (`1d4a6162`, Sep 20). Re-ported;
+  same bug, smaller diff (8 lines vs 106/37).
+- **#148 → #295**: adopted #295's single rebased commit `d9f4c8fb` in place of our
+  `193dab17` port (superset: +reasoning.summary, expanded tests/docs). Our own
+  `422dc28f` (Responses input-item skip) retained after it.
+
 ## Rebase record 2026-09-30 — onto `d44ab584` (attention reorg + fp8 linear tuning)
 
 Upstream landed a 23-commit perf push: per-dtype causal-attention reorg
@@ -98,15 +115,15 @@ drops nothing; the new candidate is Docker tag `ninfer-master:d44ab584-candidate
 | Local commit | Source | Upstream PR | What | Drop trigger |
 |---|---|---|---|---|
 | `465cff38` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
-| `6f75f6b8` | cherry-pick `193dab17` | **#148** (Sha1rholder) → re-based as **#295** | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #295 (rebase of #148; #148 itself closed unmerged 2026-09-20) merges — adopt #295, then re-diff the next row against it |
+| `99798b17` | cherry-pick `d9f4c8fb` | **#295** (rebase of #148; adopted 2026-10-04 in place of the `193dab17` port) | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #295 merges — then re-diff the next row against it |
 | `422dc28f` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #295 lands + re-diff |
-| `c00499fe` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
+| `94795422..83f04521` | port of `03df31d5..bc3a8633` (7-commit stack, 2026-10-04) | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) + config-invalidation fix + bounded config trees | When #97 merges |
 | `8ab2b38d` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling (re-anchored onto v3's `processor_options`/`FrontendOptions` chain). Our original validator fix became moot — v3 dropped the strict registered-pixel-bounds check. | When #61 merges |
 | `64a0995f` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
 | `14f81eec` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
 | `b70936cc` | **our own (docs)** | — | `FORK.md` carried-commit delta | Keep (docs) |
 | `da706aaa` | **our own (tools)** | — | `tools/upgrade_ninfer_v2_to_v3.py`: add `qwen3.8-27b/nvfp4full` to `KNOWN_COUNTS` (1259 plain / 1325 with DFlash2 graft) so our artifact upgrades to a v3 container with weight bytes preserved | When upstream registers `nvfp4full` (then the entry is upstream) |
-| `9f41b061` | cherry-pick | **#297** | fix(core): preserve workspace layout state after allocation overflow | When #297 merges |
+| `f1f3e3df` | cherry-pick `6d72167c` (re-port 2026-10-04; author force-pushed a cleaner minimal fix Sep 27) | **#297** | fix(core): preserve workspace layout state after allocation overflow | When #297 merges |
 | `2e18151b` | cherry-pick | **#274** | fix(runtime): default shared-prefix catalog sized for one request's full candidate set (7 candidates > old `max(concurrency,4)` default — the eviction bug behind our `--max-shared-prefixes 16` cfg workaround) | When #274 merges |
 | `3c951b36` | cherry-pick | **#299** | fix(frontend): keep the last value on a duplicate tool-call parameter (`duplicate_parameters_repaired` diagnostic) | When #299 merges |
 | `15447ad7` | cherry-pick | **#268** | perf(attention): fold the sigmoid gate into the causal reduce epilogue (one graph node instead of two) | When #268 merges |
