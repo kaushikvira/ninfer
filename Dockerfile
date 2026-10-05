@@ -35,6 +35,7 @@ RUN apt-get update \
         libavformat60 \
         libavutil58 \
         libcurl4t64 \
+        curl \
         libswscale7 \
     && rm -rf /var/lib/apt/lists/*
 
