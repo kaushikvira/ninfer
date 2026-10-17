@@ -29,34 +29,43 @@ This fork exists to *ship* what upstream hasn't merged yet, not to diverge:
   (Lost-file precedent: `tools/convert/qwen3_8_27b/dflash2_recipe.py` was
   dropped during the 2026-09-16 squash-rebase — don't repeat that.)
 
-## Carried commits (as of 2026-09-24 — rebased onto `bace20dc`)
+## Carried commits (as of 2026-10-17 — rebased onto `64d10fbf`)
 
-This fork = upstream `Neroued/ninfer` master (`bace20dc`, incl. the silu
-accuracy fix `c4ae8a9c`) + the commits below. The 2026-09-24 rebase added
-the five `port/2026-09-21-six-prs` ports (#297 #274 #299 #264 #268, A/B'd on
-that branch) plus two new ports (#309 #305). #309 conflicted with our #299
-port in `tool_call_parser.cpp` and was merged by hand: #309's candidate
-marker loop keeps #299's `duplicate_parameters_repaired` capture (the parser
-is loop-scoped, so the flag is captured on the winning parse).
+This fork = upstream `Neroued/ninfer` master (`64d10fbf`, the ops/MoE reorg
++ Qwen4Exp/Flash-Next + MoE CPU-offload wave) + the commits below. The
+2026-10-17 rebase re-anchored the carried set onto the reorg: the qwen
+frontend moved to `src/models/common/qwen/frontend/`, the linear/attention
+families were reorganized, and four old carried patches were **dropped as
+superseded** (see below). #309's candidate loop now rides on the dup-param
+commit's `QwenToolRegionParser` class (picked first, on purpose).
 
 | Local commit | Source | Upstream PR | What | Drop trigger |
 |---|---|---|---|---|
-| `f8c5bd3b` | **our own (tools/docs)** | — | `tools/artifact/graft_dflash2_w8.py` (z-lab DFlash2 W8G32/BF16 module graft), `FORK.md`, sanitized serving example | Keep forever (not engine) |
-| `8af0e5f7` | cherry-pick `193dab17` | **#148** (Sha1rholder) → re-based as **#295** | OpenAI Responses API: accept `include: reasoning.encrypted_content` + `reasoning.summary` | When #295 (rebase of #148) merges — adopt #295, then re-diff the next row against it |
-| `40652a3a` | **our own** | (derived from #148) | skip summary/encrypted-only reasoning **input** Items (Inspect AI multi-turn); upstream #148 only handled the create side | Keep until #148 lands + re-diff |
-| `ac0b55d1` | port of `03df31d5` | **#97** (DuncanBetts) | ccache + BuildKit cache mount in Dockerfile (incremental builds) | When #97 merges |
-| `c4114051` | cherry-pick `eb413c76` | **#61** (Sociopacific) | `--image-token-budget N` per-image Vision-token ceiling (re-anchored onto v3's `processor_options`/`FrontendOptions` chain). Our original validator fix became moot — v3 dropped the strict registered-pixel-bounds check. | When #61 merges |
-| `fb7a631a` | **our own (build)** | — | curl in the runtime image (container healthcheck support) | Keep (build, not engine) |
-| `036f3621` | **our own (docs)** | — | this patch registry + fork policy (`PATCHES.md`) | Keep (docs) |
-| `78054dab` | **our own (docs)** | — | `FORK.md` carried-commit delta | Keep (docs) |
-| `3a8401ef` | **our own (tools)** | — | `tools/upgrade_ninfer_v2_to_v3.py`: add `qwen3.8-27b/nvfp4full` to `KNOWN_COUNTS` (1259 plain / 1325 with DFlash2 graft) so our artifact upgrades to a v3 container with weight bytes preserved | When upstream registers `nvfp4full` (then the entry is upstream) |
-| `df34f428` | cherry-pick | **#297** | fix(core): preserve workspace layout state after allocation overflow | When #297 merges |
-| `458d06eb` | cherry-pick | **#274** | fix(runtime): default shared-prefix catalog sized for one request's full candidate set (7 candidates > old `max(concurrency,4)` default — the eviction bug behind our `--max-shared-prefixes 16` cfg workaround) | When #274 merges |
-| `c8a1aac0` | cherry-pick | **#299** | fix(frontend): keep the last value on a duplicate tool-call parameter (`duplicate_parameters_repaired` diagnostic) | When #299 merges |
-| `0e6fa957` | cherry-pick | **#264** | perf(nvfp4): fused SwiGLU TMA route takes a partial last M tile (ragged widths stop falling back to linear + silu_mul) | When #264 merges |
-| `05a98aeb` | cherry-pick | **#268** | perf(attention): fold the sigmoid gate into the causal reduce epilogue (one graph node instead of two) | When #268 merges |
-| `81feb389` | cherry-pick `-x`, **conflict resolved by hand** | **#309** | fix(frontend): keep quoted `</think>` closes and later `<tool_call>` markers (candidate marker loop). Merged with our #299 port — see note above | When #309 merges (re-check the #299 merge if #299 lands first) |
-| `3b1c42f5` | cherry-pick `-x` | **#305** | perf(ops): fuse attention RMSNorm + NVFP4 activation quant on the T≥1024 TMA route (our prefill chunk is 4096 — hits our path) | When #305 merges |
+| `6038507d` | cherry-pick `7092f747` | **#299** | keep-last-value on duplicate tool-call param + `QwenToolRegionParser` class + `duplicate_parameters_repaired` diagnostic. Upstream now has the *behavior* (non-strict keep-last) but not the class/diagnostic that #309's loop depends on — carried for the structure | When upstream's parser gains the class + diagnostic, or #309 drops |
+| `cf0de389` | cherry-pick `63c1e547` | **#309** | fix(frontend): keep quoted `</think>` closes and later `<tool_call>` markers (candidate marker loop), re-anchored onto `common/qwen/frontend/` | When #309 merges |
+| `188de8d9` | cherry-pick `bdedac0b` | **#309** | parser in the #309 candidate loop must be non-const | With #309 |
+| `9a4b042a` | cherry-pick `57e09c80` | **#309** | reconcile #309 close-scan with upstream constrained decoding (grammar-active exact framing) | With #309 / when constrained decoding changes |
+| `aa6c95fc` | cherry-pick `45be95b0` | **#368** (rebase of #152) | automatic shared-prefix write at the system/developer frontier (agent siblings share the long head); `--no-auto-system-shared-prefix` opt-out | When #368/#152 merges |
+| `4664eab5` | cherry-pick `92f0f23e` | **#368** | tests + docs for the system-frontier candidate | With #368 |
+| `a5400c9c` | cherry-pick `8adf4615` | **#368** | wire `--no-auto-system-shared-prefix` into Chat Completions | With #368 |
+| `dff5f983` | cherry-pick `cc79701e` | **#403** (open, fixes #402) | O(1) survivor membership in `recovery_loss` (cubic→quadratic; 147x at N=2048). Re-anchored onto `qwen3_5/program/transactions/reclaim.{cpp,h}` | When #403 merges upstream |
+| `2b734237` | **our own (tools/docs)** | — | `FORK.md`, `PATCHES.md`, `tools/convert/nvfp4full-build/` (nvfp4full artifact pipeline), `tools/artifact/graft_dflash2_w8.py` | Keep forever (not engine) |
+| `a46d1de3` | **our own (build)** | — | Dockerfile fork patch: curl (healthcheck CLI) + liburing (PLE io_uring dep, stock Dockerfile doesn't build) + ccache/BuildKit cache mount (#97) | Keep (build, not engine); drop ccache part when #97 merges |
+
+**Dropped as superseded by the `64d10fbf` reorg (2026-10-17):**
+
+- **#355** (nvfp4 tiled-prefill KV split across CTAs) — upstream's new
+  per-dtype plan architecture (`dense/causal_cache/*/plan.cpp` +
+  `CausalKvPartition`) subsumes it. Re-measure via the perf bench; re-port
+  only if the 27B gate regresses.
+- **#365** (nvfp4 linear_add verify-width deep tile) — upstream's new nvfp4
+  linear-add schedule family (sliced-K MMA for T≤32, TMA variants) covers the
+  small-token verify case. Same re-measure rule.
+- **mxfp8 shared KV-split helper** (`5d6d2fc6`/`a0ef6807`) — upstream's
+  softmax-attention reorg moved the wave-minimizing search into per-dtype
+  `plan.cpp`; the helper's target file no longer exists.
+- **standalone curl + ccache Dockerfile commits** — folded into the single
+  Dockerfile fork patch (`a46d1de3`).
 
 **Serving note (v3 cutover, 2026-09-18):** the on-box artifact was upgraded to
 `qwen3_8_27b_nvfp4full-dflash2.v3.ninfer` (+289 KB metadata, same 18.7 GiB
