@@ -50,7 +50,7 @@ commit's `QwenToolRegionParser` class (picked first, on purpose).
 | `a5400c9c` | cherry-pick `8adf4615` | **#368** | wire `--no-auto-system-shared-prefix` into Chat Completions | With #368 |
 | `dff5f983` | cherry-pick `cc79701e` | **#403** (open, fixes #402) | O(1) survivor membership in `recovery_loss` (cubic→quadratic; 147x at N=2048). Re-anchored onto `qwen3_5/program/transactions/reclaim.{cpp,h}` | When #403 merges upstream |
 | `2b734237` | **our own (tools/docs)** | — | `FORK.md`, `PATCHES.md`, `tools/convert/nvfp4full-build/` (nvfp4full artifact pipeline), `tools/artifact/graft_dflash2_w8.py` | Keep forever (not engine) |
-| `a46d1de3` | **our own (build)** | — | Dockerfile fork patch: curl (healthcheck CLI) + liburing (PLE io_uring dep, stock Dockerfile doesn't build) + ccache/BuildKit cache mount (#97) | Keep (build, not engine); drop ccache part when #97 merges |
+| `a46d1de3` | **our own (build)** | — | Dockerfile fork patch: curl (healthcheck CLI) + liburing (PLE io_uring dep, stock Dockerfile doesn't build) + ccache/BuildKit cache mount (#97) | Keep (build, not engine). **liburing lines are upstream PR #407** (open, mergeable) — drop them from this patch when #407 merges; **curl** suggested on #407 (comment 2026-10-17) — drop when it lands; drop ccache part when #97 merges |
 
 **Dropped as superseded by the `64d10fbf` reorg (2026-10-17):**
 
