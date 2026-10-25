@@ -113,10 +113,13 @@ void DFlashTfDump::capture_layer(std::int32_t layer, const Tensor& value, std::i
     // row pitch (nb[1]) rather than value.bytes() — mirrors DFlashFeatureSink::capture_layer.
     const std::size_t element_bytes = 2;
     const std::size_t rows          = static_cast<std::size_t>(value.ne[0]);
-    const std::size_t columns       = static_cast<std::size_t>(value.ne[1]);
     const std::size_t width_bytes   = rows * element_bytes;
     const std::size_t source_pitch  = static_cast<std::size_t>(value.nb[1]);
-    scratch_.resize(width_bytes * columns / element_bytes);
+    // Size from the physical buffer (value.bytes()), not ne[1]: the residual is a strided view
+    // whose logical column count (ne[1]) can be smaller than the buffer it aliases.
+    const std::size_t data_bytes = value.bytes();
+    const std::size_t columns    = data_bytes / width_bytes;
+    scratch_.resize(data_bytes / element_bytes);
     CUDA_CHECK(cudaMemcpy2DAsync(scratch_.data(), width_bytes, value.data, source_pitch, width_bytes,
                                  columns, cudaMemcpyDeviceToHost, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
