@@ -106,14 +106,19 @@ void DFlashTfDump::capture_layer(std::int32_t layer, const Tensor& value, std::i
         if (static_cast<std::int32_t>(tap_layers_[i]) == layer) { index = i; break; }
     }
     if (index >= tap_layers_.size() || !selected_[index]) { return; }
-    if (value.dtype != DType::BF16 || !value.is_contiguous()) {
-        throw std::invalid_argument("dflash_tfdump: taps take contiguous BF16 [rows, T]");
+    if (value.dtype != DType::BF16) {
+        throw std::invalid_argument("dflash_tfdump: taps take BF16 [rows, T]");
     }
-    const auto rows    = static_cast<std::size_t>(value.ne[0]);
-    const auto columns = static_cast<std::size_t>(value.numel()) / rows;
-    scratch_.resize(rows * columns);
-    CUDA_CHECK(cudaMemcpyAsync(scratch_.data(), value.data, value.bytes(), cudaMemcpyDeviceToHost,
-                               stream));
+    // The residual may be a strided view (a column-slice of a wider buffer), so copy with the
+    // row pitch (nb[1]) rather than value.bytes() — mirrors DFlashFeatureSink::capture_layer.
+    const std::size_t element_bytes = 2;
+    const std::size_t rows          = static_cast<std::size_t>(value.ne[0]);
+    const std::size_t columns       = static_cast<std::size_t>(value.ne[1]);
+    const std::size_t width_bytes   = rows * element_bytes;
+    const std::size_t source_pitch  = static_cast<std::size_t>(value.nb[1]);
+    scratch_.resize(width_bytes * columns / element_bytes);
+    CUDA_CHECK(cudaMemcpy2DAsync(scratch_.data(), width_bytes, value.data, source_pitch, width_bytes,
+                                 columns, cudaMemcpyDeviceToHost, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
     char name[16];
     std::snprintf(name, sizeof(name), "L%02d", layer);
@@ -147,9 +152,12 @@ void DFlashTfDump::capture_positions(const Tensor& positions, cudaStream_t strea
     if (positions.dtype != DType::I32) {
         throw std::invalid_argument("dflash_tfdump: positions are int32 [T]");
     }
+    // Append (not replace): capture_positions fires per prefill chunk, so accumulate across
+    // chunks and rewrite positions.npy with the running total each time.
     const auto count = static_cast<std::size_t>(positions.numel());
-    positions_.resize(count);
-    CUDA_CHECK(cudaMemcpyAsync(positions_.data(), positions.data,
+    const auto old   = positions_.size();
+    positions_.resize(old + count);
+    CUDA_CHECK(cudaMemcpyAsync(positions_.data() + old, positions.data,
                                static_cast<std::size_t>(count) * sizeof(std::int32_t),
                                cudaMemcpyDeviceToHost, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
