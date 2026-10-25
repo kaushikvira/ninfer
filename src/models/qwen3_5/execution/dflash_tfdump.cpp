@@ -125,19 +125,6 @@ void DFlashTfDump::capture_layer(std::int32_t layer, const Tensor& value, std::i
     CUDA_CHECK(cudaMemcpy2DAsync(scratch_.data(), width_bytes, value.data, source_pitch, width_bytes,
                                  columns, cudaMemcpyDeviceToHost, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
-    // Derive positions for this chunk (a prefill runs 0..T-1); the first tap layer marks a new
-    // chunk. The dump is constructed per prefill chunk, so accumulate in a process-wide static
-    // to keep 0..total-1 contiguous across chunks. (KNOWN LIMITATION: not reset between
-    // separate prefill requests in the same process — fine for a single capture run.)
-    if (layer == static_cast<std::int32_t>(tap_layers_.front())) {
-        static std::vector<std::int32_t> g_positions;
-        for (std::size_t c = 0; c < columns; ++c) {
-            g_positions.push_back(static_cast<std::int32_t>(g_positions.size()) +
-                                  static_cast<std::int32_t>(c));
-        }
-        write_npy(directory_ / "positions.npy", "<i4", g_positions.size(), g_positions.data(),
-                  sizeof(std::int32_t));
-    }
     char name[16];
     std::snprintf(name, sizeof(name), "L%02d", layer);
     if (compact_) {
@@ -154,7 +141,33 @@ void DFlashTfDump::capture_layer(std::int32_t layer, const Tensor& value, std::i
         out.write(reinterpret_cast<const char*>(head), sizeof(head));
         out.write(reinterpret_cast<const char*>(scratch_.data()),
                   static_cast<std::streamsize>(scratch_.size() * sizeof(std::uint16_t)));
+        out.flush();
         if (!out) { throw std::runtime_error("dflash_tfdump: short write of a compact hidden tap"); }
+        out.close();
+        // Derive positions from what is ACTUALLY on disk: re-read the first tap layer's .bin,
+        // count the total columns, and write positions.npy = 0..total-1. This guarantees
+        // positions always match the features (the dump is constructed per chunk and capture_layer
+        // is also called from non-prefill phases, so a running counter would drift). (KNOWN
+        // LIMITATION: not reset between separate prefill requests in-process — fine for a single
+        // capture run; the positions are relative 0..T-1, which is what a drafter needs.)
+        if (layer == static_cast<std::int32_t>(tap_layers_.front())) {
+            const std::string fpath = (directory_ / ("hidden_" + std::string(name) + ".bin")).string();
+            std::size_t total_cols = 0;
+            if (std::ifstream in(fpath, std::ios::binary); in) {
+                std::uint32_t fp, cols, rows;
+                while (in.read(reinterpret_cast<char*>(&fp), 4) &&
+                       in.read(reinterpret_cast<char*>(&cols), 4) &&
+                       in.read(reinterpret_cast<char*>(&rows), 4)) {
+                    total_cols += cols;
+                    in.seekg(static_cast<std::streamoff>(static_cast<std::uint64_t>(cols) * rows * 2),
+                             std::ios::cur);
+                }
+            }
+            std::vector<std::int32_t> pos(total_cols);
+            for (std::size_t i = 0; i < total_cols; ++i) { pos[i] = static_cast<std::int32_t>(i); }
+            write_npy(directory_ / "positions.npy", "<i4", pos.size(), pos.data(),
+                      sizeof(std::int32_t));
+        }
         return;
     }
     const auto directory = directory_ / "hidden" / name;
