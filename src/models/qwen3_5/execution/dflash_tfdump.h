@@ -61,6 +61,9 @@ public:
     // BF16 [V, T] host logits (vocab-major); position c is column c, vocab i is logits[i * T + c].
     void write_logits(std::span<const std::uint16_t> logits, std::int32_t rows, std::int32_t cols,
                       std::span<const std::int32_t> positions) const;
+    // D2H a device BF16 [V, len] logits tensor and write its top-k logprobs (chunk-relative
+    // positions 0..len-1). No-op when logits are disabled.
+    void capture_logits(const Tensor& logits, cudaStream_t stream);
     void write_meta(const std::string& producer, const std::string& artifact) const;
 
     [[nodiscard]] bool enabled() const noexcept { return true; }

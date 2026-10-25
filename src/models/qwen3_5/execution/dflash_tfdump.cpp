@@ -255,6 +255,19 @@ void DFlashTfDump::write_logits(std::span<const std::uint16_t> logits, std::int3
     }
 }
 
+void DFlashTfDump::capture_logits(const Tensor& logits, cudaStream_t stream) {
+    if (!logits_) { return; }
+    const std::int32_t rows = logits.ne[0]; // vocab
+    const std::int32_t cols = logits.ne[1]; // chunk length
+    std::vector<std::uint16_t> host(static_cast<std::size_t>(rows) * cols);
+    CUDA_CHECK(cudaMemcpyAsync(host.data(), logits.data, logits.bytes(), cudaMemcpyDeviceToHost,
+                               stream));
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    std::vector<std::int32_t> positions(static_cast<std::size_t>(cols));
+    for (std::int32_t i = 0; i < cols; ++i) { positions[static_cast<std::size_t>(i)] = i; }
+    write_logits(host, rows, cols, positions);
+}
+
 void DFlashTfDump::write_meta(const std::string& producer, const std::string& artifact) const {
     std::ofstream out(directory_ / "meta.json");
     out << "{\"format\":\"tfdump/1\",\"producer\":\"" << producer << "\",\"artifact\":\""

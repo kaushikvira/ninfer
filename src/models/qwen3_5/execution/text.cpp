@@ -1335,6 +1335,17 @@ TextContext::prefill_impl(std::span<const int> ids, const TextPrefill* text_pref
                             : work_.alloc(DType::BF16, {dimension(config_.hidden_size), len});
             ops::rmsnorm(x, *final_norm_, config_.rms_norm_eps, true, xf, execution_);
 
+            // v2: capture per-position target logits (the supervision) — project ALL `len`
+            // positions to logits, not just the last. Dump-gated: zero work when the dump is off.
+            if constexpr (requires { tap.dump_ptr(); }) {
+                if (auto* dl = tap.dump_ptr(); dl != nullptr) {
+                    Tensor all_logits =
+                        work_.alloc(DType::BF16, {dimension(config_.vocab_size), len});
+                    project(xf, *lm_head_, all_logits, work_, execution_);
+                    dl->capture_logits(all_logits, execution_.stream());
+                }
+            }
+
             if (is_last) {
                 Tensor last_xf = xf.slice(1, len - 1, 1);
                 Tensor logits  = matrix_window(io_.logits, 1);

@@ -79,6 +79,8 @@ struct DFlashFeatureSink {
     // meta. No-op when dump is null.
     void finalize_dump(std::span<const std::int32_t> tokens, const Tensor& logits,
                        std::span<const std::int32_t> positions, cudaStream_t stream);
+    // The dump sink (null when off) — used by the prefill path to capture per-position logits.
+    [[nodiscard]] DFlashTfDump* dump_ptr() const noexcept { return dump.get(); }
 };
 
 class TextContext {
