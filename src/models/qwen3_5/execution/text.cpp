@@ -200,7 +200,6 @@ void DFlashFeatureSink::capture_layer(int layer, const Tensor& value, CudaExecut
 }
 
 void DFlashFeatureSink::capture_positions(const Tensor& source, CudaExecutionView execution) {
-    if (dump != nullptr) { dump->capture_positions(source, execution.stream()); }
     const std::uint32_t complete_mask = layers.size() == 32 ? ~0U : ((1U << layers.size()) - 1U);
     if (captured_mask != complete_mask) {
         throw std::logic_error("DFlash target call did not publish every feature layer");

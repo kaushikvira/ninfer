@@ -120,6 +120,18 @@ void DFlashTfDump::capture_layer(std::int32_t layer, const Tensor& value, std::i
     CUDA_CHECK(cudaMemcpy2DAsync(scratch_.data(), width_bytes, value.data, source_pitch, width_bytes,
                                  columns, cudaMemcpyDeviceToHost, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
+    // Derive positions for this chunk (a prefill runs 0..T-1); the first tap layer marks a new
+    // chunk, so accumulate 0..total-1 across chunks. (The engine's capture_positions call site
+    // only sees the final decode positions, so we derive them here instead.)
+    if (layer == static_cast<std::int32_t>(tap_layers_.front())) {
+        const std::int32_t start = static_cast<std::int32_t>(positions_.size());
+        for (std::size_t c = 0; c < columns; ++c) {
+            positions_.push_back(start + static_cast<std::int32_t>(c));
+        }
+        std::vector<std::int32_t> host(positions_.begin(), positions_.end());
+        write_npy(directory_ / "positions.npy", "<i4", host.size(), host.data(),
+                  sizeof(std::int32_t));
+    }
     char name[16];
     std::snprintf(name, sizeof(name), "L%02d", layer);
     if (compact_) {
