@@ -11,6 +11,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 #include <string_view>
 #include <utility>
 
@@ -109,6 +110,7 @@ void DFlashTfDump::capture_layer(std::int32_t layer, const Tensor& value, std::i
     if (value.dtype != DType::BF16) {
         throw std::invalid_argument("dflash_tfdump: taps take BF16 [rows, T]");
     }
+    // The residual is contiguous (verified: bytes == ne[0]*ne[1]*2), so columns == ne[1].
     // The residual may be a strided view (a column-slice of a wider buffer), so copy with the
     // row pitch (nb[1]) rather than value.bytes() — mirrors DFlashFeatureSink::capture_layer.
     const std::size_t element_bytes = 2;
@@ -124,22 +126,28 @@ void DFlashTfDump::capture_layer(std::int32_t layer, const Tensor& value, std::i
                                  columns, cudaMemcpyDeviceToHost, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
     // Derive positions for this chunk (a prefill runs 0..T-1); the first tap layer marks a new
-    // chunk, so accumulate 0..total-1 across chunks. (The engine's capture_positions call site
-    // only sees the final decode positions, so we derive them here instead.)
+    // chunk. The dump is constructed per prefill chunk, so accumulate in a process-wide static
+    // to keep 0..total-1 contiguous across chunks. (KNOWN LIMITATION: not reset between
+    // separate prefill requests in the same process — fine for a single capture run.)
     if (layer == static_cast<std::int32_t>(tap_layers_.front())) {
-        const std::int32_t start = static_cast<std::int32_t>(positions_.size());
+        static std::vector<std::int32_t> g_positions;
         for (std::size_t c = 0; c < columns; ++c) {
-            positions_.push_back(start + static_cast<std::int32_t>(c));
+            g_positions.push_back(static_cast<std::int32_t>(g_positions.size()) +
+                                  static_cast<std::int32_t>(c));
         }
-        std::vector<std::int32_t> host(positions_.begin(), positions_.end());
-        write_npy(directory_ / "positions.npy", "<i4", host.size(), host.data(),
+        write_npy(directory_ / "positions.npy", "<i4", g_positions.size(), g_positions.data(),
                   sizeof(std::int32_t));
     }
     char name[16];
     std::snprintf(name, sizeof(name), "L%02d", layer);
     if (compact_) {
-        std::ofstream out(directory_ / ("hidden_" + std::string(name) + ".bin"),
-                          std::ios::binary | std::ios::app);
+        // Truncate on the first write of a file this process, append afterwards — avoids stale
+        // bytes from a pre-existing file corrupting the record byte count.
+        static std::unordered_set<std::string> written;
+        const std::string path = (directory_ / ("hidden_" + std::string(name) + ".bin")).string();
+        const std::ios::openmode mode = written.count(path) ? std::ios::app : std::ios::trunc;
+        written.insert(path);
+        std::ofstream out(path, std::ios::binary | mode);
         if (!out) { throw std::runtime_error("dflash_tfdump: cannot open compact hidden tap"); }
         const std::int32_t head[3] = {first_position, static_cast<std::int32_t>(columns),
                                       static_cast<std::int32_t>(rows)};
