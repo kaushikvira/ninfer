@@ -53,10 +53,11 @@ std::string position_name(std::int32_t position) {
 
 } // namespace
 
-std::unique_ptr<DFlashTfDump> DFlashTfDump::from_environment(std::int32_t layers) {
+std::unique_ptr<DFlashTfDump> DFlashTfDump::from_environment(std::span<const std::uint32_t> tap_layers) {
     const char* directory = std::getenv("NINFER_DFLASH_TFDUMP");
     if (directory == nullptr || *directory == '\0') { return nullptr; }
-    std::vector<bool> selected(static_cast<std::size_t>(layers), true);
+    std::vector<std::uint32_t> layers(tap_layers.begin(), tap_layers.end());
+    std::vector<bool> selected(layers.size(), true);
     if (const char* list = std::getenv("NINFER_DFLASH_TFDUMP_LAYERS")) {
         const std::string_view text(list);
         if (text != "all") {
@@ -65,11 +66,14 @@ std::unique_ptr<DFlashTfDump> DFlashTfDump::from_environment(std::int32_t layers
                 std::stringstream stream{std::string(text)};
                 std::string item;
                 while (std::getline(stream, item, ',')) {
-                    const int layer = std::stoi(item);
-                    if (layer < 0 || layer >= layers) {
-                        throw std::invalid_argument("NINFER_DFLASH_TFDUMP_LAYERS out of range");
+                    const int want = std::stoi(item);
+                    bool found = false;
+                    for (std::size_t i = 0; i < layers.size(); ++i) {
+                        if (static_cast<int>(layers[i]) == want) { selected[i] = true; found = true; break; }
                     }
-                    selected[static_cast<std::size_t>(layer)] = true;
+                    if (!found) {
+                        throw std::invalid_argument("NINFER_DFLASH_TFDUMP_LAYERS: unknown tap layer " + item);
+                    }
                 }
             }
         }
@@ -83,24 +87,25 @@ std::unique_ptr<DFlashTfDump> DFlashTfDump::from_environment(std::int32_t layers
     if (const char* t = std::getenv("NINFER_DFLASH_TFDUMP_TOPK")) {
         topk = std::max(0, std::atoi(t));
     }
-    return std::make_unique<DFlashTfDump>(directory, std::move(selected),
+    return std::make_unique<DFlashTfDump>(directory, std::move(layers), std::move(selected),
                                           logits == nullptr || std::string_view(logits) != "0",
                                           compact, topk);
 }
 
-DFlashTfDump::DFlashTfDump(std::filesystem::path directory, std::vector<bool> layers, bool logits,
-                           bool compact, std::int32_t topk)
-    : directory_(std::move(directory)), layers_(std::move(layers)), logits_(logits),
-      compact_(compact), topk_(topk) {
+DFlashTfDump::DFlashTfDump(std::filesystem::path directory, std::vector<std::uint32_t> tap_layers,
+                           std::vector<bool> selected, bool logits, bool compact, std::int32_t topk)
+    : directory_(std::move(directory)), tap_layers_(std::move(tap_layers)),
+      selected_(std::move(selected)), logits_(logits), compact_(compact), topk_(topk) {
     std::filesystem::create_directories(directory_);
 }
 
 void DFlashTfDump::capture_layer(std::int32_t layer, const Tensor& value, std::int32_t first_position,
                                  cudaStream_t stream) {
-    if (layer < 0 || static_cast<std::size_t>(layer) >= layers_.size() ||
-        !layers_[static_cast<std::size_t>(layer)]) {
-        return;
+    std::size_t index = tap_layers_.size();
+    for (std::size_t i = 0; i < tap_layers_.size(); ++i) {
+        if (static_cast<std::int32_t>(tap_layers_[i]) == layer) { index = i; break; }
     }
+    if (index >= tap_layers_.size() || !selected_[index]) { return; }
     if (value.dtype != DType::BF16 || !value.is_contiguous()) {
         throw std::invalid_argument("dflash_tfdump: taps take contiguous BF16 [rows, T]");
     }

@@ -41,12 +41,13 @@ namespace ninfer::models::qwen3_5::execution {
 
 class DFlashTfDump final {
 public:
-    // Null when NINFER_DFLASH_TFDUMP is unset. `layers` is the count of tapped layers (the
-    // DFlash target_layer_ids size) used to size the per-layer selection.
-    [[nodiscard]] static std::unique_ptr<DFlashTfDump> from_environment(std::int32_t layers);
+    // Null when NINFER_DFLASH_TFDUMP is unset. `tap_layers` are the actual tapped layer indices
+    // (the DFlash target_layer_ids, e.g. {5,19,33,47,61}) used for the per-layer selection.
+    [[nodiscard]] static std::unique_ptr<DFlashTfDump>
+    from_environment(std::span<const std::uint32_t> tap_layers);
 
-    explicit DFlashTfDump(std::filesystem::path directory, std::vector<bool> layers, bool logits,
-                          bool compact, std::int32_t topk);
+    explicit DFlashTfDump(std::filesystem::path directory, std::vector<std::uint32_t> tap_layers,
+                          std::vector<bool> selected, bool logits, bool compact, std::int32_t topk);
 
     // D2H-copy the tapped layer residual (contiguous BF16 [rows, T]) and write it to disk.
     // `first_position` is the sequence position of column 0 (0 when unknown).
@@ -66,7 +67,8 @@ public:
 
 private:
     std::filesystem::path directory_;
-    std::vector<bool> layers_;
+    std::vector<std::uint32_t> tap_layers_; // actual tapped layer indices
+    std::vector<bool> selected_;            // per tap_layers_ entry
     bool logits_  = true;
     bool compact_ = true;
     std::int32_t topk_ = 0;

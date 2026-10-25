@@ -67,8 +67,7 @@ DFlashFeatureSink prefill_feature_sink_impl(PrefillContext& state,
             .layers          = std::span<const std::uint32_t>(config.target_layer_ids),
             .consume_prefill = std::move(consume_prefill),
         };
-        sink.dump = DFlashTfDump::from_environment(
-            static_cast<std::int32_t>(config.target_layer_ids.size()));
+        sink.dump = DFlashTfDump::from_environment(config.target_layer_ids);
         return sink;
     }
 }
