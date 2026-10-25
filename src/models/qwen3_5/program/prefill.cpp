@@ -3,6 +3,7 @@
 #include "models/common/context/work.h"
 #include "models/qwen3_5/program/execution_context.h"
 #include "models/qwen3_5/execution/linear.h"
+#include "models/qwen3_5/execution/dflash_tfdump.h"
 #include "core/device.h"
 #include "ninfer/ops/gdn_replay.h"
 #include "ninfer/ops/sampling.h"

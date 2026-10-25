@@ -1,5 +1,6 @@
 #include "models/qwen3_5/program/graph_execution.h"
 #include "models/qwen3_5/execution/linear.h"
+#include "models/qwen3_5/execution/dflash_tfdump.h"
 #include <cmath>
 #include "models/qwen3_5/program/internal.h"
 #include "models/qwen3_5/program/execution_context.h"
@@ -60,12 +61,15 @@ DFlashFeatureSink prefill_feature_sink_impl(PrefillContext& state,
         require_dflash_state(state);
         const auto& target = state.execution.parameters.model.config().text;
         const auto& config = *state.execution.parameters.model.config().draft;
-        return DFlashFeatureSink{
+        DFlashFeatureSink sink{
             .features        = &dflash_state(state).prefill_features,
             .positions       = &dflash_state(state).prefill_positions,
             .layers          = std::span<const std::uint32_t>(config.target_layer_ids),
             .consume_prefill = std::move(consume_prefill),
         };
+        sink.dump = DFlashTfDump::from_environment(
+            static_cast<std::int32_t>(config.target_layer_ids.size()));
+        return sink;
     }
 }
 

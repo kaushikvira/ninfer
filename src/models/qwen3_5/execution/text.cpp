@@ -1,5 +1,6 @@
 #include "models/qwen3_5/program/internal.h"
 #include "models/qwen3_5/execution/text.h"
+#include "models/qwen3_5/execution/dflash_tfdump.h"
 #include "models/qwen3_5/program/speculative/mtp_alignment.h"
 #include "models/common/moe/resources.h"
 #include "models/qwen3_5/program/text_graph.h"
@@ -167,6 +168,7 @@ void DFlashFeatureSink::begin(const Tensor& value) {
 void DFlashFeatureSink::capture_layer(int layer, const Tensor& value, CudaExecutionView execution) {
     const auto it = std::find(layers.begin(), layers.end(), layer);
     if (it == layers.end()) { return; }
+    if (dump != nullptr) { dump->capture_layer(layer, value, 0, execution.stream()); }
     const std::size_t index = static_cast<std::size_t>(it - layers.begin());
     Tensor* destination     = batch_features != nullptr ? batch_features : features;
     if (layers.size() > 32 || active_tokens <= 0 || value.dtype != DType::BF16 ||
@@ -198,6 +200,7 @@ void DFlashFeatureSink::capture_layer(int layer, const Tensor& value, CudaExecut
 }
 
 void DFlashFeatureSink::capture_positions(const Tensor& source, CudaExecutionView execution) {
+    if (dump != nullptr) { dump->capture_positions(source, execution.stream()); }
     const std::uint32_t complete_mask = layers.size() == 32 ? ~0U : ((1U << layers.size()) - 1U);
     if (captured_mask != complete_mask) {
         throw std::logic_error("DFlash target call did not publish every feature layer");
@@ -225,6 +228,20 @@ void DFlashFeatureSink::consume_prefill_chunk(std::int32_t tokens, bool rewrite_
     Tensor feature_window  = features->slice(1, 0, tokens);
     Tensor position_window = positions->slice(0, 0, tokens);
     consume_prefill(feature_window, position_window, rewrite_checkpoint);
+}
+
+void DFlashFeatureSink::finalize_dump(std::span<const std::int32_t> tokens, const Tensor& logits,
+                                      std::span<const std::int32_t> positions, cudaStream_t stream) {
+    if (dump == nullptr) { return; }
+    const std::int32_t rows = logits.ne[0];
+    const std::size_t cols  = static_cast<std::size_t>(logits.ne[1]);
+    std::vector<std::uint16_t> host(static_cast<std::size_t>(rows) * cols);
+    CUDA_CHECK(cudaMemcpyAsync(host.data(), logits.data, logits.bytes(), cudaMemcpyDeviceToHost,
+                               stream));
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    dump->write_tokens(tokens);
+    dump->write_logits(host, rows, static_cast<std::int32_t>(cols), positions);
+    dump->write_meta("ninfer", "dflash2-27b");
 }
 
 TextContext::TextContext(DeviceContext& ctx, const execution::Parameters& weights,

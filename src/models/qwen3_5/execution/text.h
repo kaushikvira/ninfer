@@ -9,6 +9,8 @@
 #include "core/linear_attention_state.h"
 #include "core/tensor.h"
 #include "core/weight.h"
+
+#include <memory>
 #include "ninfer/ops/sampling.h"
 #include "ninfer/ops/softmax_attention.h"
 #include "ninfer/ops/moe.h"
@@ -48,6 +50,8 @@ struct PrefillChunkResult {
     runtime::ExecutionTiming timing;
 };
 
+class DFlashTfDump;
+
 struct DFlashFeatureSink {
     static constexpr bool enabled = true;
     using PrefillConsumer         = std::function<void(const Tensor&, const Tensor&, bool)>;
@@ -63,11 +67,18 @@ struct DFlashFeatureSink {
     PrefillConsumer consume_prefill;
     std::uint32_t captured_mask = 0;
     std::int32_t active_tokens  = 0;
+    // Optional DFlash2 teacher-forcing dump (null = off). Additive consumer of the tap: it D2H's
+    // each captured layer residual + positions and writes them to disk. Never changes generation.
+    std::unique_ptr<DFlashTfDump> dump;
 
     void begin(const Tensor& value);
     void capture_layer(int layer, const Tensor& value, CudaExecutionView execution);
     void capture_positions(const Tensor& source, CudaExecutionView execution);
     void consume_prefill_chunk(std::int32_t tokens, bool rewrite_checkpoint);
+    // Finalize the dump for one scored sequence: write tokens + target logits (BF16 [V, T]) +
+    // meta. No-op when dump is null.
+    void finalize_dump(std::span<const std::int32_t> tokens, const Tensor& logits,
+                       std::span<const std::int32_t> positions, cudaStream_t stream);
 };
 
 class TextContext {
