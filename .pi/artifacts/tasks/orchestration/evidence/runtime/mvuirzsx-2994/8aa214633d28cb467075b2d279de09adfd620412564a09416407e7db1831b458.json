@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_73a97e920b0ee393",
+  "command": "cd /home/kv/work/ninfer && ls src/runtime/engine/ && grep -n \"publish_runtime_stats\\|resident_empty\" src/runtime/engine/*.inl | head",
+  "commandDigest": "sha256:d11c5e797b177ba3a64cb025926e12a3b45ca6aa2ca55a063d7e38a8a36eb611",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:16:51.744Z",
+  "output": "causal_score_core.h\ncontext_cache\ncontext_capacity.cpp\ncontext_capacity.h\ndistributed_startup.inl\nengine.cpp\nengine_core.h\nengine_execution.inl\nengine_metrics.inl\nengine_requests.inl\nengine_schedule.inl\ngeneration_budget.h\ninstance.h\nprepared_startup.inl\npublic_types.cpp\nrequest_record.h\nscheduler.h\nstartup.cpp\nstartup.h\nstartup.inl\nstartup_memory.cpp\nstartup_memory.h\nworker.cpp\nworker.h\nsrc/runtime/engine/engine_execution.inl:636:    publish_runtime_stats();\nsrc/runtime/engine/engine_metrics.inl:168:void EngineCore<Instance>::publish_runtime_stats() {\nsrc/runtime/engine/engine_requests.inl:366:    publish_runtime_stats();\nsrc/runtime/engine/engine_requests.inl:447:    publish_runtime_stats();\nsrc/runtime/engine/engine_schedule.inl:110:[[nodiscard]] bool EngineCore<Instance>::resident_empty() const noexcept {\nsrc/runtime/engine/engine_schedule.inl:718:                        (!resident_empty() || (!restoring && !paused_.empty()))) {\nsrc/runtime/engine/engine_schedule.inl:786:        if (resident_empty()) {\nsrc/runtime/engine/engine_schedule.inl:1030:                        scheduler_.should_restore(!paused_.empty(), resident_empty()))) {\nsrc/runtime/engine/engine_schedule.inl:1114:            publish_runtime_stats();\nsrc/runtime/engine/engine_schedule.inl:1126:    if (!resident_empty() || !paused_.empty() || materializing_ || context_owner_ ||\n"
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_6bd25c6d986dd2ef",
+  "command": "cd /home/kv/work/ninfer && sed -n '1,15p' include/ninfer/types.h && grep -n \"struct LoadSummary\" -A 18 include/ninfer/types.h | head -24",
+  "commandDigest": "sha256:167f7ae6eb51f60c23ad27013c1e90ccbd8740066d813f2d1f9508605af9bfc4",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:21:16.786Z",
+  "output": "#pragma once\n\n#include \"ninfer/deployment.h\"\n#include \"ninfer/observability/snapshot.h\"\n\n#include <chrono>\n#include <cstddef>\n#include <cstdint>\n#include <filesystem>\n#include <functional>\n#include <memory>\n#include <optional>\n#include <stdexcept>\n#include <string>\n#include <string_view>\n"
+}

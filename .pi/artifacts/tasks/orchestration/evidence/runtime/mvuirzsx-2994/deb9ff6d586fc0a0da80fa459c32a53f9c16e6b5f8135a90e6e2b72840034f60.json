@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_7a44764f7558a8e4",
+  "command": "cd /home/kv/work/ninfer && sed -n '40,80p' tests/cmake/ProductTests.cmake",
+  "commandDigest": "sha256:e92390bd91f156f9ebcd1d2012c2b87eb73161a7e19f0f3a640a555d2a307573",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:20:31.863Z",
+  "output": "\nninfer_add_test(ninfer_anthropic_schema_test\n  SOURCES \"${CMAKE_CURRENT_LIST_DIR}/../test_anthropic_schema.cpp\"\n  LIBRARIES ninfer_serve)\n\nninfer_add_test(ninfer_serve_options_test\n  SOURCES \"${CMAKE_CURRENT_LIST_DIR}/../test_serve_options.cpp\"\n  LIBRARIES ninfer_serve)\n\nninfer_add_test(ninfer_request_log_test\n  SOURCES \"${CMAKE_CURRENT_LIST_DIR}/../test_request_log.cpp\"\n  LIBRARIES ninfer_serve)\n\nninfer_add_test(ninfer_metrics_test\n  SOURCES \"${CMAKE_CURRENT_LIST_DIR}/../test_metrics.cpp\"\n  LIBRARIES ninfer_serve)\n\nninfer_add_test(ninfer_http_error_handler_test\n  SOURCES \"${CMAKE_CURRENT_LIST_DIR}/../test_http_error_handler.cpp\"\n  LIBRARIES ninfer_serve)\n\nninfer_add_test(ninfer_http_transport_test\n  SOURCES \"${CMAKE_CURRENT_LIST_DIR}/../test_http_transport.cpp\"\n  LIBRARIES ninfer_serve)\n\nninfer_add_test(ninfer_tool_streaming_test\n  SOURCES \"${CMAKE_CURRENT_LIST_DIR}/../test_tool_streaming.cpp\"\n  LIBRARIES ninfer_serve ninfer_model_execution ninfer::json)\n"
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_90e87d1dba0aa4ec",
+  "command": "cd /home/kv/work/ninfer && head -12 src/runtime/contract/request.h",
+  "commandDigest": "sha256:ff793358aac998867c5565c5bee039b486bab9a1c927a28c6373f0b10659bdbb",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:21:38.660Z",
+  "output": "#pragma once\n\n#include \"ninfer/types.h\"\n#include <atomic>\n#include <cstddef>\n#include <cstdint>\n#include <optional>\n#include <string>\n\nnamespace ninfer::runtime {\n\n// A bounded tokenizer or partial media plan supplies a lower bound, not the full prompt length.\n"
+}

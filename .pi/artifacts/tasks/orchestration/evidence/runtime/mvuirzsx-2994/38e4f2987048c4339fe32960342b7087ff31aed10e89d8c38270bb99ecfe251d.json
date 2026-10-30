@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_3e7dc2874dd9e90c",
+  "command": "cd /home/kv/work/ninfer && grep -rn \"enum class EntryPoint\" src/product/ && grep -n \"startup_usage_text\" tests/*.cpp src/product/config/options.cpp | head -5",
+  "commandDigest": "sha256:40ab00dfde20f71295b77561870c1a74b6cc777e3d9931da6f15c2642219c468",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:28:28.767Z",
+  "output": "src/product/config/options.h:18:enum class EntryPoint { Cli, Serve, Bench, Perplexity };\nsrc/product/config/options.cpp:621:std::string startup_usage_text(std::string_view executable, EntryPoint entry) {\n"
+}

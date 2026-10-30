@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_15306a900ce51c5b",
+  "command": "cd /home/kv/work/ninfer && wc -l src/runtime/engine/engine_core.h include/ninfer/engine.h src/runtime/engine/engine.cpp src/serve/http_server.cpp src/serve/generation_service.h src/models/qwen3_5/session/session.h src/models/qwen3_5/session/internal.h include/ninfer/observability/snapshot.h",
+  "commandDigest": "sha256:11b207fa39b1642887ed8893695a29cb31d1fd28a5dfb949209861396fec12d4",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:16:42.084Z",
+  "output": "   674 src/runtime/engine/engine_core.h\n   134 include/ninfer/engine.h\n   531 src/runtime/engine/engine.cpp\n   548 src/serve/http_server.cpp\n   157 src/serve/generation_service.h\n   443 src/models/qwen3_5/session/session.h\n   566 src/models/qwen3_5/session/internal.h\n   197 include/ninfer/observability/snapshot.h\n  3250 total\n"
+}

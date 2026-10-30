@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_d2a569dd1bff74fa",
+  "command": "cd /home/kv/work/ninfer && git status && git log --oneline -3 && git branch --show-current",
+  "commandDigest": "sha256:1ecfb806b0b03ac8137e7081e4ba65c42a9668b6597e95ce71921b97c0d5e854",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:16:32.382Z",
+  "output": "On branch feat/admin-prefix-cache\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\t.pi/\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n1882c6ad docs: align 5090 deployment example and model card\nd602894a fix(core): preserve workspace layout on allocation failure\n2b13afa5 fix(frontend): report token counts in context errors\nfeat/admin-prefix-cache\n"
+}

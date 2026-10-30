@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_07d460bc95080fd0",
+  "command": "cd /home/kv/work/ninfer && sed -n '1,30p' src/runtime/contract/resources.h",
+  "commandDigest": "sha256:c43cdef0eaef11327dc81f38d02a8533cb2f3db69fe9ea3653fbd61ec971b9fe",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:20:40.957Z",
+  "output": "#pragma once\n\n#include \"core/transfer_work.h\"\n#include \"core/context_pool.h\"\n#include \"runtime/contract/request.h\"\n\n#include <algorithm>\n#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <limits>\n#include <optional>\n#include <string_view>\n#include <string>\n#include <vector>\n\nnamespace ninfer::runtime {\n\nenum class CheckpointRole : std::uint8_t { InputReplay, LongAnchor, SharedPrefix, Continuation };\nenum class CheckpointOrigin : std::uint8_t { Semantic, Intermediate };\nenum class CaptureSkip : std::uint8_t { Unavailable, Retained };\nenum class ContextStart : std::uint8_t { Started, Deferred, Stale };\n\nstruct KvPoolId {\n    std::uint16_t index                                           = 0;\n    friend constexpr bool operator==(KvPoolId, KvPoolId) noexcept = default;\n};\n\n// IDs describe logical history kinds, not physical memory partitions.\nstruct KvPoolDescriptor {\n"
+}

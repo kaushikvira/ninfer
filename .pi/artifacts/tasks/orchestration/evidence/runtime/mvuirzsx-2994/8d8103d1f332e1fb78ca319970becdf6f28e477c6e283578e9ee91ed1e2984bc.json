@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_5644bef036f7c5cd",
+  "command": "cd /home/kv/work/ninfer && grep -n \"prefix_table.h\\|AdminCacheRequest\\|build_prefix_table\" src/runtime/engine/engine_core.h | head && sed -n '293,300p' src/runtime/engine/engine_core.h",
+  "commandDigest": "sha256:c988fae05aa82aedf92f950c6857ac45b7f67a33fe467a6b90855806faf17c99",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:22:03.196Z",
+  "output": "        MeasurementCommand command{};\n        std::promise<EngineSnapshot> completion;\n    };\n\n    bool process_measurement();\n\n    enum class HostWorkClass : std::uint8_t {\n        Decode,\n"
+}

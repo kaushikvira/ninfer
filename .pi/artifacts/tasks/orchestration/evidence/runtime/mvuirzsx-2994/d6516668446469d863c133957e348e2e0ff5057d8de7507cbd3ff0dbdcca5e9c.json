@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_6e052698342945c5",
+  "command": "cd /home/kv/work/ninfer && tail -15 include/ninfer/types.h",
+  "commandDigest": "sha256:217e37f4bf4af080ddb6f4604c90367708014c0f1b5a82b2a81ecaa4735f16c5",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:21:19.648Z",
+  "output": "\nstruct GenerationResult {\n    PromptSummary prompt;\n    std::vector<TokenId> generated_token_ids;\n    std::string content;\n    std::string reasoning;\n    std::vector<GeneratedToolCall> tool_calls;\n    ToolCallParseDiagnostics tool_call_parse;\n    std::uint32_t reasoning_tokens = 0;\n    FinishReason finish_reason     = FinishReason::None;\n    std::optional<std::string> matched_stop_string;\n    RequestStats stats;\n};\n\n} // namespace ninfer\n"
+}

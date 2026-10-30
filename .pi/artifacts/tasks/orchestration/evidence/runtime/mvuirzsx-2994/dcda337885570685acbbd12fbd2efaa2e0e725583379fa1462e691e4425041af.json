@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_e4fef591261bfbc3",
+  "command": "cd /home/kv/work/ninfer && grep -rn \"capacity\" src/models/qwen3_5/session/session.cpp | head && grep -n \"state_store\" src/models/qwen3_5/session/session.cpp | head && grep -rn \"struct StateDirectory\\|image_bytes\\|capacity\" src/models/common/context/state_directory.h 2>/dev/null | head; ls src/models/common/context/",
+  "commandDigest": "sha256:de3f9932fd29c459e59f59721a3726674855ba5102bc121f629e4b4c52884901",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:19:00.150Z",
+  "output": "177:std::size_t Session::checkpoint_capacity() const noexcept { return impl_->checkpoints.capacity(); }\n395:      host_context_enabled(plan.context.ranks.at(0).host_bytes != 0), capacity(plan.capacity),\n402:    checkpoints.configure(Checkpoints::capacity_for_metadata(directory.metadata_budget().limit()),\n405:        count_storage.acquire(TokenCountBuilder::capacity_bytes(plan.profile->public_tokens));\n391:      state_store(&directory.states()), text_kv_histories(&directory.pool(0).histories()),\ncheckpoint_store.h\ncontract.h\ndirectory\ndirectory.cpp\ndirectory.h\nphysical_reclaim.h\nrecovery.h\nrelease_inventory.h\nsnapshot.h\nstorage.cpp\nstorage.h\ntransfer.cpp\ntransfer.h\nwire.cpp\nwire.h\nwork.cpp\nwork.h\n"
+}

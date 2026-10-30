@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_96969bd432cfeec6",
+  "command": "cd /home/kv/work/ninfer && sed -n '270,282p' src/models/glm5next/session/internal.h",
+  "commandDigest": "sha256:f4a75bae3072db83ebfed551b312c97e6835a3e3cf1386b6baad39ef6e242fa0",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:23:17.472Z",
+  "output": "    [[nodiscard]] std::optional<CheckpointHandle> detach(Sequence&, runtime::CheckpointRole,\n                                                         PreparedCheckpoint = {});\n    [[nodiscard]] std::vector<context::PageId> checkpoint_pages(std::span<const CheckpointHandle>,\n                                                                std::uint32_t pool) const;\n    [[nodiscard]] std::vector<Image> checkpoint_images(std::span<const CheckpointHandle>) const;\n    [[nodiscard]] ContextReleaseSet footprint(std::span<const CheckpointHandle>,\n                                              bool released) const;\n    [[nodiscard]] ContextReclaimPlan plan_reclaim(std::span<const CheckpointHandle>,\n                                                  std::span<const CheckpointHandle>,\n                                                  const ContextDemand&) const;\n    [[nodiscard]] context::ReleasePlan<ContextRelease, ContextReleaseSet>\n    plan_releases(std::span<const CheckpointHandle>, std::span<const CheckpointHandle>,\n                  const ContextDemand&) const;\n"
+}

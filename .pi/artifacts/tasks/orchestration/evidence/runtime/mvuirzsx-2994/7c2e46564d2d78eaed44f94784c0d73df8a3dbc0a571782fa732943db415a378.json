@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_47f0aefa87f21533",
+  "command": "cd /home/kv/work/ninfer && cmake --build build/rtx5090-dev -j 2>&1 | grep -E \"error|Error|FAILED|ninja: build\" | head -30",
+  "commandDigest": "sha256:eeb8bbddd3034229a6c7e03373474af7625d08b221f59b65054f8d20897aeca8",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:27:22.139Z",
+  "output": "[187/926] Generating CXX dyndep file tests/CMakeFiles/ninfer_http_error_handler_test.dir/CXX.dd\n[325/926] Building CXX object tests/CMakeFiles/ninfer_expert_cache_test.dir/expert_cache_cuda_errors.cpp.o\n[573/926] Building CXX object tests/CMakeFiles/ninfer_http_error_handler_test.dir/test_http_error_handler.cpp.o\n[867/926] Linking CXX executable tests/ninfer_http_error_handler_test\n"
+}

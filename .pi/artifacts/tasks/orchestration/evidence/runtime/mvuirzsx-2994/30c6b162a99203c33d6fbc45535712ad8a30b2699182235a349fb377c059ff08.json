@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_e456544e58e0cdb2",
+  "command": "cd /home/kv/work/ninfer && cmake --build build/rtx5090-dev -j > /dev/null 2>&1; echo \"BUILD EXIT: $?\"; ctest --test-dir build/rtx5090-dev -R 'admin_cache|serve_options' --output-on-failure 2>&1 | tail -12",
+  "commandDigest": "sha256:a5f370db30fb30dca9795e89ce0a39767c606dea844499f7fdb15a111f9b5c07",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:29:02.646Z",
+  "output": "BUILD EXIT: 0\nTest project /home/kv/work/ninfer/build/rtx5090-dev\n    Start 58: ninfer_serve_options_test\n1/2 Test #58: ninfer_serve_options_test ........   Passed    0.00 sec\n    Start 62: ninfer_admin_cache_test\n2/2 Test #62: ninfer_admin_cache_test ..........   Passed    0.00 sec\n\n100% tests passed, 0 tests failed out of 2\n\nTotal Test time (real) =   0.01 sec\n"
+}

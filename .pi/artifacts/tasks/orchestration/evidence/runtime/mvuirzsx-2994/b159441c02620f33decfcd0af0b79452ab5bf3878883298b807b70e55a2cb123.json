@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_edca37251e17123a",
+  "command": "cd /home/kv/work/ninfer && grep -n \"process_measurement\\|snapshot_cancellations\" src/runtime/engine/engine_core.h",
+  "commandDigest": "sha256:7b40972d2c4e91d7c3bf5b12632054d3b6b968e69e9426b07c95624fa37ebe45",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:22:01.326Z",
+  "output": "297:    bool process_measurement();\n518:    [[nodiscard]] std::array<bool, kMaximumConcurrency> snapshot_cancellations() const noexcept;\n"
+}

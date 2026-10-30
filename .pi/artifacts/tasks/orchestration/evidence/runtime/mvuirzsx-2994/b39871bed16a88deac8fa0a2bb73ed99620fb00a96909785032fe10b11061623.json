@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_037b7b611b752251",
+  "command": "cd /home/kv/work/ninfer && grep -n \"process_measurement();\" src/runtime/engine/engine_schedule.inl | head -3 && sed -n '1208,1218p' src/runtime/engine/engine_schedule.inl",
+  "commandDigest": "sha256:352046f0edf81ab274fd79123005593efc6ba57226e3eafd91808b256728c209",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:22:20.284Z",
+  "output": "1214:            if (!outstanding) progressed |= process_measurement();\n            {\n                ExecutionCallScope call(*this, CoordinatorCall::Flush);\n                instance_.executor->flush();\n                call.finish();\n            }\n            outstanding = execution_outstanding();\n            if (!outstanding) progressed |= process_measurement();\n        } catch (...) {\n            fail_all(std::current_exception());\n            return;\n        }\n"
+}

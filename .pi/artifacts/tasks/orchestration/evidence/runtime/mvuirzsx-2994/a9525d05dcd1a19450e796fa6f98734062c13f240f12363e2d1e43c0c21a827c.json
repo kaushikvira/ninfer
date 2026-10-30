@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_aa96dfcdb7af9476",
+  "command": "nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv",
+  "commandDigest": "sha256:2fd8b7d22c2da6d6995321c39b7b3e3b3e86b1f417a988e49a8fd1f1dc29f3da",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:29:30.927Z",
+  "output": "index, memory.used [MiB], memory.total [MiB]\n0, 31746 MiB, 32607 MiB\n1, 66876 MiB, 73415 MiB\n"
+}

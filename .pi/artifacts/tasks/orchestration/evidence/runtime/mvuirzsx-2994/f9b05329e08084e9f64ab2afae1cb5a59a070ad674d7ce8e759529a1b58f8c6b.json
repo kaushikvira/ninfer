@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_243f2475d8f0506b",
+  "command": "cd /home/kv/work/ninfer && ls out/ 2>/dev/null | head; find / -name \"*.ninfer\" -not -path \"*/proc/*\" 2>/dev/null | head -5; nvidia-smi -L 2>/dev/null | head -2",
+  "commandDigest": "sha256:fb9a0aeb37b951bb8a62dca67dd56f271e1baae355963c68bc337da066a9b7fb",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:29:11.740Z",
+  "output": "/home/kv/models/qwen36-35b-a3b/qwen3_6_35b_a3b.ninfer\n/home/kv/models/thinkingcap-nvfp4full/qwen3_8_27b_thinkingcap_nvfp4full-dflash2.ninfer\n/home/kv/models/swift15-v2/qwen3_8_27b_swift15_v2.ninfer\n/home/kv/models/swift15-v3/qwen3_8_27b_swift15_v3.ninfer\n/home/kv/models/swift15-groupwise-int/qwen3_8_27b_swift15_groupwise-int-dflash2.ninfer\nGPU 0: NVIDIA GeForce RTX 5090 (UUID: GPU-96e8aad1-36af-877f-a66c-eee44a10c757)\nGPU 1: NVIDIA RTX PRO 5000 72GB Blackwell (UUID: GPU-be6be629-3efd-c53e-0703-baef12265eef)\n"
+}

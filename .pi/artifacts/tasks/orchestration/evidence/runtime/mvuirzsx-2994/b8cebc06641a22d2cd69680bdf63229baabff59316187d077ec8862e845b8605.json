@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_de03aa1d0f1dd54e",
+  "command": "cd /home/kv/work/ninfer && sed -n '470,500p' src/product/config/options.cpp && sed -n '220,240p' src/product/config/configuration.cpp && grep -n \"enable_cors\\|max_request_bytes\" src/product/config/options.h",
+  "commandDigest": "sha256:6637cc260c5ad1ef5c5e3a50597a9f7d79fe677c1bbd5bd3f358ce6bd4954659",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:18:37.085Z",
+  "output": "                sampling.seed.reset();\n            else\n                sampling.seed = u64();\n            break;\n        case Field::ServerHost:\n            parsed.serve.host = string();\n            break;\n        case Field::ServerPort:\n            parsed.serve.port = static_cast<int>(u64());\n            break;\n        case Field::ApiKey:\n            parsed.serve.api_key = string();\n            break;\n        case Field::ModelId:\n            if (!string().empty()) parsed.serve.model_id_override = string();\n            break;\n        case Field::Cors:\n            parsed.serve.enable_cors = boolean();\n            break;\n        case Field::MaxRequestSize:\n            parsed.serve.max_request_bytes = u64();\n            break;\n        case Field::ResponseRecords:\n            parsed.serve.response_store_max_records = u64();\n            break;\n        case Field::ResponseSize:\n            parsed.serve.response_store_max_bytes = u64();\n            break;\n        case Field::LogLevel:\n            launch.logging.level = parse_log_level(string());\n            break;\n        case Field::ServerPort:\n            value = static_cast<std::uint64_t>(server->port);\n            break;\n        case Field::ApiKey:\n            value = std::string(server->api_key.empty() ? \"disabled\" : \"configured\");\n            break;\n        case Field::ModelId:\n            value = server->model_id_override.value_or(\"artifact name\");\n            break;\n        case Field::Cors:\n            value = server->enable_cors;\n            break;\n        case Field::MaxRequestSize:\n            value = std::uint64_t{server->max_request_bytes};\n            break;\n        case Field::ResponseRecords:\n            value = std::uint64_t{server->response_store_max_records};\n            break;\n        case Field::ResponseSize:\n            value = std::uint64_t{server->response_store_max_bytes};\n            break;\n94:    bool enable_cors                       = false;\n95:    std::size_t max_request_bytes          = kDefaultMaxRequestBytes;\n"
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_f6f0b13b231179bc",
+  "command": "cd /home/kv/work/ninfer && cat src/serve/CMakeLists.txt && grep -n \"context_pools\\|state_objects\\|kv_pools\\|host_context\" src/serve/metrics.cpp | head -20",
+  "commandDigest": "sha256:dac6e07e58edc4e6b77691967df6ee82c4a15c957c0bb1e23b305cc35a3562dd",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:18:43.522Z",
+  "output": "add_library(ninfer_serve STATIC\n  http_transport.cpp\n  request_validation.cpp\n  openai_chat_request.cpp\n  openai_chat_response.cpp\n  openai_chat_http.cpp\n  openai_common.cpp\n  openai_responses_request.cpp\n  openai_responses_state.cpp\n  openai_responses_response.cpp\n  anthropic_messages_request.cpp\n  anthropic_messages_response.cpp\n  anthropic_messages_http.cpp\n  openai_responses_store.cpp\n  translate.cpp\n  generation_service.cpp\n  request_events.cpp\n  operational_log.cpp\n  request_log.cpp\n  metrics.cpp\n  http_server.cpp\n  openai_responses_http.cpp\n)\nninfer_internal_includes(ninfer_serve)\ntarget_link_libraries(ninfer_serve\n  PUBLIC ninfer_engine Threads::Threads ninfer::json ninfer::httplib ninfer_product_config\n  PRIVATE ninfer_media_acquire ninfer_product_logging ninfer_grammar CUDA::cudart)\n208:    GAUGE(state_objects, \"context_state_objects\", \"Live logical State objects.\");\n218:    for (const auto& pool : stats.context_pools) {\n245:    for (const auto& pool : stats.kv_pools)\n258:        for (const auto& pool : stats.kv_pools) {\n471:        allocation(\"context\", \"host_pinned\", a.host_context_bytes);\n"
+}

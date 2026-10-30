@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_ef3350cd03e749c6",
+  "command": "cd /home/kv/work/ninfer && grep -n \"state_store\\|text_kv\\|backend_kv\\|StateDirectory\\|HistoryDirectory\\|PageDirectory\\|kTextKvPool\\|kBackendKvPool\" src/models/qwen4_exp/session/internal.h src/models/qwen4_exp/session/planning.h 2>/dev/null | head -20 && grep -rn \"kTextKvPool\\|kBackendKvPool\\|KvPoolId\" src/models/qwen4_exp/ | head -5",
+  "commandDigest": "sha256:112f58856e4656329444f63b5517e06be5ceaa7297b8a711249ba4d3f7a15197",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:19:24.970Z",
+  "output": "src/models/qwen4_exp/session/internal.h:69:    context::StateDirectory* states;\nsrc/models/qwen4_exp/wire.cpp:357:            if (in.boolean()) t.resource.pool = runtime::KvPoolId{in.u16()};\n"
+}

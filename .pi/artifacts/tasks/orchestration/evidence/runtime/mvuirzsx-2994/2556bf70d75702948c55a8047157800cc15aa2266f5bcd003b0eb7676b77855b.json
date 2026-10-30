@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_01a891e52b87a96b",
+  "command": "cd /home/kv/work/ninfer && sed -n '160,200p' src/runtime/engine/engine_metrics.inl",
+  "commandDigest": "sha256:8e965001f073211410b5e20fca7b871edace9fe46f9ec0bb57ee046aa1ddb1a1",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:17:13.743Z",
+  "output": "                                         std::uint64_t RuntimeHostWorkStats::*invocation_member,\n                                         Clock::time_point started) noexcept {\n    RuntimeHostWorkStats& stats = cumulative_stats_.host_work;\n    stats.*elapsed_member += elapsed_ns(started, Clock::now());\n    ++(stats.*invocation_member);\n}\n\ntemplate <class Instance>\nvoid EngineCore<Instance>::publish_runtime_stats() {\n    HostPhaseMeasurement measurement = begin_host_phase();\n    std::optional<nvtx::ScopedRange> phase_range;\n    phase_range.emplace(nvtx::Name::EngineMaintenance, nvtx::Category::Runtime);\n    const Clock::time_point detail_started = Clock::now();\n    std::optional<nvtx::ScopedRange> detail_range;\n    detail_range.emplace(nvtx::Name::StatsPublication, nvtx::Category::Control);\n    auto& snapshot             = stats_snapshot_;\n    snapshot                   = cumulative_stats_;\n    const auto& executions     = instance_.executor->execution_statistics();\n    snapshot.decode_rounds     = executions[static_cast<std::size_t>(ExecutionKind::Decode)].units;\n    snapshot.decode_row_rounds = executions[static_cast<std::size_t>(ExecutionKind::Decode)].rows;\n    const auto physical        = instance_.session->physical_usage();\n    snapshot.context_pools     = physical.pools;\n    snapshot.context_metadata  = physical.metadata;\n    snapshot.state_objects     = physical.state_objects;\n    snapshot.history_objects   = physical.history_objects;\n    for (auto& pool : snapshot.kv_pools) {\n        pool.occupied_page_groups = physical.kv_page_groups.at(pool.id);\n    }\n\n    {\n        std::lock_guard lock(queue_mutex_);\n        snapshot.waiting_requests = static_cast<std::uint32_t>(pending_.size());\n    }\n    snapshot.prefilling_requests    = 0;\n    snapshot.paused_requests        = static_cast<std::uint32_t>(paused_.size());\n    snapshot.replaying_requests     = 0;\n    snapshot.materializing_requests = materializing_.has_value() ? 1U : 0U;\n    for (std::uint32_t lane = 0; lane < max_concurrency_; ++lane) {\n        if (slots_[lane] == nullptr) { continue; }\n        ++snapshot.running_requests;\n        if (slots_[lane]->is_prefilling()) { ++snapshot.prefilling_requests; }\n"
+}

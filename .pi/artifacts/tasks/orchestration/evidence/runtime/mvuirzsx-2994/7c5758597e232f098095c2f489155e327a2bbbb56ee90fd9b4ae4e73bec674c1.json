@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_6a37ae84d90cdf06",
+  "command": "cd /home/kv/work/ninfer && grep -n \"Cors\\|MaxRequestSize\" src/product/config/schema.cpp src/product/config/options.cpp src/product/config/configuration.cpp src/product/config/options.h",
+  "commandDigest": "sha256:cb7e4f68adaf2a715db9350ee535ec891de64c4efb1b72e284f47820f7051686",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:18:34.011Z",
+  "output": "src/product/config/schema.cpp:97:    {Field::Cors, \"server.cors\", \"--cors\", \"--no-cors\", \"\", \"Permissive CORS headers.\",\nsrc/product/config/schema.cpp:99:    {Field::MaxRequestSize, \"server.max_request_size\", \"--max-request-size\", \"\", \"SIZE\",\nsrc/product/config/schema.cpp:318:    case Field::Cors:\nsrc/product/config/schema.cpp:362:    case Field::MaxRequestSize:\nsrc/product/config/options.cpp:486:        case Field::Cors:\nsrc/product/config/options.cpp:489:        case Field::MaxRequestSize:\nsrc/product/config/configuration.cpp:229:        case Field::Cors:\nsrc/product/config/configuration.cpp:232:        case Field::MaxRequestSize:\n"
+}

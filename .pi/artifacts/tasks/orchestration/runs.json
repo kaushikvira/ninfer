@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "runs": [
+    {
+      "version": 1,
+      "invocationId": "3da63a5c-2250-45cb-ad40-1c4ac3b107b7",
+      "contextRequestDigest": "sha256:v1:8f9ba03168691510e5711eea8b27ed144829366820dfcb378d2fc7f5950e9d12",
+      "agentType": "coder",
+      "description": "Implement admin prefix-cache API",
+      "projectDirectory": "/home/kv/work/ninfer",
+      "workspaceDirectory": "/home/kv/work/ninfer",
+      "executionDirectory": "/home/kv/work/ninfer",
+      "startedAt": "2026-10-30T05:16:26.917Z",
+      "updatedAt": "2026-10-30T05:47:40.987Z",
+      "heartbeatAt": "2026-10-30T05:47:32.386Z",
+      "executionPhase": "completed",
+      "reportedOutcome": "unknown",
+      "verificationPhase": "failed",
+      "reviewPhase": "rejected",
+      "verificationIssues": [
+        "Child reported non-success outcome: unknown"
+      ],
+      "claims": [],
+      "taskId": "mvuirzsx-2994",
+      "sessionReference": "/home/kv/work/ninfer/.pi/artifacts/tasks/sessions/mvuirzsx-2994/2026-10-30T05-16-27-352Z_01a18b3c-e957-766c-bfbf-1291871cc2ca.jsonl",
+      "resultDigest": "sha256:v1:549bce7f5e7998cc660c94dba93b35afc1fc9e68dd2d4c97e133cf84987e6de2"
+    }
+  ]
+}

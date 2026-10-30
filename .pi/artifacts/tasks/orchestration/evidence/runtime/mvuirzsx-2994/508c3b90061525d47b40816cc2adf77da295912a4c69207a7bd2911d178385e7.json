@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_45115e5b09bd4125",
+  "command": "cd /home/kv/work/ninfer && sed -n '470,490p' src/serve/http_server.cpp",
+  "commandDigest": "sha256:627dedf199973311cc04d870502a703435bd7882364010280b8b03eb6340fd26",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:23:48.174Z",
+  "output": "    server_.Get(R\"(/v1/responses/([^/]+))\",\n                [this](const httplib::Request& req, httplib::Response& res) {\n                    handle_response_get(req, res);\n                });\n    server_.Delete(R\"(/v1/responses/([^/]+))\",\n                   [this](const httplib::Request& req, httplib::Response& res) {\n                       handle_response_delete(req, res);\n                   });\n    server_.Post(\"/v1/messages/count_tokens\",\n                 [this](const httplib::Request& req, httplib::Response& res) {\n                     handle_count_tokens(req, res);\n                 });\n    server_.Post(\"/v1/messages\", [this](const httplib::Request& req, httplib::Response& res) {\n        handle_messages(req, res);\n    });\n}\n\nvoid HttpServer::handle_models(const httplib::Request&, httplib::Response& res) const {\n    res.set_content(\n        make_models_list(public_model_id_, unix_time_now(), options_.launch.engine.max_context),\n        \"application/json\");\n"
+}

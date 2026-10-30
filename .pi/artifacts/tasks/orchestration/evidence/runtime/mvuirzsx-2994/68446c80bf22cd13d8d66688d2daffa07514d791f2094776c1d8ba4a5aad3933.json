@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_36c51e93b3136224",
+  "command": "cd /home/kv/work/ninfer && ctest --test-dir build/rtx5090-dev -LE 'gpu|real' 2>&1 | grep -E \"Failed|tests passed\" | head -30",
+  "commandDigest": "sha256:5bc9ce89fd4e8b85a2ca729b2a01270d34d316889fb114da3b038d663f05264d",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 1,
+  "observedAt": "2026-10-30T05:47:40.637Z",
+  "output": "Command aborted"
+}

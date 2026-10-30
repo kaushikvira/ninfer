@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_92410553229e2938",
+  "command": "cd /home/kv/work/ninfer && grep -rn \"struct PageId\" -A 8 src/models/common/context/ | head -14 && grep -n \"pool_count\\|pool(\" src/models/common/context/directory.h | head",
+  "commandDigest": "sha256:c63eee4c35a892f97dfcbc6bd46f00e0667395686be189c942316aca1ccd67ac",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:22:39.658Z",
+  "output": "src/models/common/context/directory/pages.h:20:struct PageId {\nsrc/models/common/context/directory/pages.h-21-    std::uint32_t pool_id    = invalid_pool_id;\nsrc/models/common/context/directory/pages.h-22-    std::uint32_t index      = 0;\nsrc/models/common/context/directory/pages.h-23-    std::uint32_t generation = 0;\nsrc/models/common/context/directory/pages.h-24-\nsrc/models/common/context/directory/pages.h-25-    [[nodiscard]] bool valid() const noexcept {\nsrc/models/common/context/directory/pages.h-26-        return pool_id != invalid_pool_id && generation != 0;\nsrc/models/common/context/directory/pages.h-27-    }\nsrc/models/common/context/directory/pages.h-28-\n202:    [[nodiscard]] KVPoolDirectory& pool(std::uint32_t);\n203:    [[nodiscard]] const KVPoolDirectory& pool(std::uint32_t) const;\n205:    [[nodiscard]] std::size_t pool_count() const noexcept { return pools_.size(); }\n"
+}

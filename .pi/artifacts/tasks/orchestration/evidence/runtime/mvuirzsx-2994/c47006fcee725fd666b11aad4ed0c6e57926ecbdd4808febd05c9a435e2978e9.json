@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_e9bdf94103edf053",
+  "command": "cd /home/kv/work/ninfer && grep -n \"struct ContextKvPoolUsage\" -A 8 include/ninfer/observability/*.h && grep -n \"device_state_slots\" include/ninfer/types.h src/product/config/*.cpp | head",
+  "commandDigest": "sha256:1914a9d41714f289e37284a77cc74690e4921b5b3e447a5a731f12ce6270f56e",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:18:52.304Z",
+  "output": "include/ninfer/observability/execution.h:207:struct ContextKvPoolUsage {\ninclude/ninfer/observability/execution.h-208-    std::uint16_t id = 0;\ninclude/ninfer/observability/execution.h-209-    std::string label;\ninclude/ninfer/observability/execution.h-210-    std::uint32_t occupied_page_groups                                           = 0;\ninclude/ninfer/observability/execution.h-211-    friend bool operator==(const ContextKvPoolUsage&, const ContextKvPoolUsage&) = default;\ninclude/ninfer/observability/execution.h-212-};\ninclude/ninfer/observability/execution.h-213-\ninclude/ninfer/observability/execution.h-214-// Frozen before the first nonempty text or tool-argument delta; call metadata does not count.\ninclude/ninfer/observability/execution.h-215-// This differs from the first accepted model token and the client's first HTTP output. Elapsed\n"
+}

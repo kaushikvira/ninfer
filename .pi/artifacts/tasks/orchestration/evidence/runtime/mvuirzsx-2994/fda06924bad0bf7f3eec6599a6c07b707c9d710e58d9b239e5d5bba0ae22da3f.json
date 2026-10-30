@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_461e7ebd3a48538e",
+  "command": "cd /home/kv/work/ninfer && cmake --build build/rtx5090-dev -j 2>&1 | grep -E \"error|Error|FAILED|ninja: build\" | head -30",
+  "commandDigest": "sha256:eeb8bbddd3034229a6c7e03373474af7625d08b221f59b65054f8d20897aeca8",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:26:28.376Z",
+  "output": "[12/1276] Scanning /home/kv/work/ninfer/tests/expert_cache_cuda_errors.cpp for CXX dependencies\n[84/1140] Scanning /home/kv/work/ninfer/tests/test_http_error_handler.cpp for CXX dependencies\nFAILED: [code=1] src/models/CMakeFiles/ninfer_model_control.dir/qwen3_5/session/checkpoints.cpp.o \n/home/kv/work/ninfer/src/models/qwen3_5/session/checkpoints.cpp:87:33: error: no matching function for call to ‘std::span<const ninfer::models::context::HistoryPrefix* const>::span(const ninfer::models::context::HistoryPrefix*, int)’\n/home/kv/work/ninfer/src/models/qwen3_5/session/checkpoints.cpp:92:86: error: no matching function for call to ‘std::span<const ninfer::models::context::HistoryPrefix* const>::span(const ninfer::models::context::HistoryPrefix*, int)’\nFAILED: [code=1] src/runtime/CMakeFiles/ninfer_engine.dir/engine/engine.cpp.o \n/home/kv/work/ninfer/src/runtime/engine/engine_schedule.inl:1167:5: error: need ‘typename’ before ‘ninfer::runtime::EngineCore<Instance>::AdminCacheRequest::Command’ because ‘ninfer::runtime::EngineCore<Instance>::AdminCacheRequest’ is a dependent scope [-Wtemplate-body]\n/home/kv/work/ninfer/src/runtime/engine/engine_schedule.inl:1173:9: error: ‘command’ was not declared in this scope [-Wtemplate-body]\n/home/kv/work/ninfer/src/runtime/engine/engine_schedule.inl:1179:13: error: ‘command’ was not declared in this scope [-Wtemplate-body]\nninja: build stopped: subcommand failed.\n"
+}

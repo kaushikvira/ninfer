@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_aba2783028cfe5b8",
+  "command": "cd /home/kv/work/ninfer && grep -n \"ContextPoolUsage\\|ContextKvPoolUsage\\|ContextPoolCapacity\\|struct.*Capacity\\|host_context\\|state\" include/ninfer/observability/resources.h | head -30",
+  "commandDigest": "sha256:0f719dd581c1144e4fd9a60cde20afcc2883b3db16949a9e3a48717fc93a7607",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:16:46.627Z",
+  "output": "70:    std::uint64_t host_context_bytes       = 0;\n84:        return host_weights_bytes + io_pinned_bytes + host_context_bytes + ple_pinned_bytes +\n135:struct ContextPoolCapacity {\n140:    friend bool operator==(const ContextPoolCapacity&, const ContextPoolCapacity&) = default;\n145:struct ContextPoolUsage {\n162:    friend bool operator==(const ContextPoolUsage&, const ContextPoolUsage&) = default;\n"
+}
