@@ -7,6 +7,7 @@
 #include "models/common/context/transfer.h"
 #include "models/common/qwen/vision/vision.h"
 #include "models/qwen3_5/program/program.h"
+#include "models/qwen3_5/execution/dflash_tfdump.h"
 #include "models/qwen3_5/execution/parameters.h"
 #include "models/qwen3_5/program/resources.h"
 #include "models/qwen3_5/program/graphs.h"
@@ -155,6 +156,9 @@ public:
     const KvCacheStorage kv_storage;
     const WorkspaceSpec workspace_plan;
     Resources resources;
+    // DFlash2 teacher-forcing dump (null unless NINFER_DFLASH_TFDUMP is set); created lazily
+    // on the first generation prefill and outlives every TextRun that borrows it.
+    std::unique_ptr<execution::DFlashTfDump> tf_dump;
     std::unique_ptr<context::ContextStorage> storage;
     std::unique_ptr<context::ContextMigration> compute_actions;
     std::unique_ptr<context::ContextMigration> context_actions;

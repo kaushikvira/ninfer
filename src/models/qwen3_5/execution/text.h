@@ -55,6 +55,8 @@ struct ReplayRecords {
 
 using TextStateUpdate = std::variant<SequenceUpdate, StepUpdate, ReplayRecords>;
 
+class DFlashTfDump;
+
 // Selected post-layer residuals concatenate along the feature axis. With residency_slots,
 // features is BF16 [H*layers,W,Slots], and valid row prefixes scatter to absolute residency
 // slots. Otherwise features is BF16 [H*layers,W*B] and optional positions is I32 [W*B].
@@ -65,6 +67,10 @@ struct DFlashFeatureSink {
     Tensor positions;
     Tensor residency_slots;
     std::span<const std::uint32_t> layers;
+    // Optional DFlash2 teacher-forcing dump (null = off). Additive consumer of the tap: it
+    // D2H-copies each captured tapped-layer residual and writes it to disk. The program owns
+    // the dump; it outlives every TextRun that borrows this sink. Never changes generation.
+    DFlashTfDump* dump = nullptr;
 };
 
 // One mathematical Main traversal. All borrowed storage stays live through completion or

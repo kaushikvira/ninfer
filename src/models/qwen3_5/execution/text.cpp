@@ -4,6 +4,7 @@
 #include "core/transfer.h"
 #include "models/qwen3_5/execution/attention.h"
 #include "models/qwen3_5/execution/dense_mlp.h"
+#include "models/qwen3_5/execution/dflash_tfdump.h"
 #include "models/qwen3_5/execution/gdn.h"
 #include "models/qwen3_5/execution/workspace.h"
 #include "ninfer/ops/causal_conv1d_silu.h"
@@ -337,6 +338,12 @@ void TextRun::capture_features(std::uint32_t layer) {
         copy_rows_async({target.data, extent, target.device}, target.nb[1],
                         {residual_.data, residual_.bytes(), residual_.device}, residual_.nb[1],
                         bytes, residual_.ne[1], view_.execution);
+    }
+    // DFlash2 teacher-forcing dump: D2H-copy the tapped residual to disk. Gated on the dump
+    // pointer; zero work when NINFER_DFLASH_TFDUMP is unset.
+    if (features_->dump) {
+        features_->dump->capture_layer(static_cast<std::int32_t>(layer), residual_, 0,
+                                       view_.execution.stream());
     }
 }
 

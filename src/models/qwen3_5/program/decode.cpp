@@ -183,6 +183,15 @@ void RankProgramImpl::begin_target(ComputeOperation& operation) {
         if (forward) {
             features->features  = state.prefill_features.slice(1, 0, width);
             features->positions = state.prefill_positions.slice(0, 0, width);
+            if (std::holds_alternative<ForwardWork>(operation.request.work.operation)) {
+                // DFlash2 teacher-forcing dump: created lazily on the first generation prefill
+                // (null unless NINFER_DFLASH_TFDUMP is set). Attached to the generation prefill
+                // sink only, so the dump hooks never fire under CUDA-graph capture (which runs
+                // decode/verify only).
+                if (!tf_dump)
+                    tf_dump = execution::DFlashTfDump::from_environment(features->layers);
+                features->dump = tf_dump.get();
+            }
         } else {
             features->features        = state.pending_features.slice(1, 0, width);
             features->residency_slots = frame.residency_slots.slice(0, 0, batch);
