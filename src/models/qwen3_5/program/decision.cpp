@@ -177,6 +177,27 @@ void RankProgramImpl::launch_decision(ComputeOperation& operation) {
         ops::sample(logits, tokens, vocabulary, frame.sampling,
                     frame.sampling_positions.slice(0, 0, batch), purpose, resources.work,
                     device.execution_view());
+        // DFlash2 teacher-forcing dump: capture the per-position target logits (the
+        // supervision) for the whole chunk — the standard prefill projects only the last
+        // position, so the dump path projects ALL positions through the output head — plus
+        // the chunk's token ids and meta. Gated on the dump being enabled; zero work when
+        // NINFER_DFLASH_TFDUMP is unset.
+        if (forward && operation.width && tf_dump) {
+            const auto width = static_cast<int>(operation.width);
+            Tensor all_hidden = frame.input_view(width, 1).hidden;
+            Tensor all_logits = resources.work.alloc(
+                DType::BF16, {execution::dimension(parameters.profile->config.text.vocab_size),
+                              width});
+            execution::project(all_hidden.view({all_hidden.ne[0], width}),
+                               parameters.text.output_head, all_logits, resources.work,
+                               device.execution_view());
+            tf_dump->capture_logits(all_logits, device.stream());
+            auto host = frame.host_input_view(width, 1);
+            tf_dump->write_tokens(
+                std::span<const std::int32_t>(static_cast<const std::int32_t*>(host.ids.data),
+                                              host.ids.numel()));
+            tf_dump->write_meta("ninfer", "dflash2-27b");
+        }
     }
     readback_decode(operation.batch, false);
     gpu_timer.record_result();

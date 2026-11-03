@@ -57,6 +57,8 @@ public:
     // Store the token positions (int32 [T]) for naming + positions.npy.
     void capture_positions(const Tensor& positions, cudaStream_t stream);
 
+    // Append the chunk's token ids to tokens.npy (int64 [T]); rewritten with the running
+    // total, so chunked prefills accumulate across chunks.
     void write_tokens(std::span<const std::int32_t> tokens);
     // BF16 [V, T] host logits (vocab-major); position c is column c, vocab i is logits[i * T + c].
     void write_logits(std::span<const std::uint16_t> logits, std::int32_t rows, std::int32_t cols,
@@ -77,6 +79,7 @@ private:
     std::int32_t topk_ = 0;
     std::vector<std::uint16_t> scratch_;
     std::vector<std::int32_t> positions_;
+    std::vector<std::int64_t> tokens_;
 };
 
 } // namespace ninfer::models::qwen3_5::execution

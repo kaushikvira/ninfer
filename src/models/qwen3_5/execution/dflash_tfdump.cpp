@@ -202,8 +202,14 @@ void DFlashTfDump::capture_positions(const Tensor& positions, cudaStream_t strea
 }
 
 void DFlashTfDump::write_tokens(std::span<const std::int32_t> tokens) {
-    std::vector<std::int64_t> wide(tokens.begin(), tokens.end());
-    write_npy(directory_ / "tokens.npy", "<i8", wide.size(), wide.data(), sizeof(std::int64_t));
+    // Append (not replace): write_tokens fires per prefill chunk, so accumulate across chunks
+    // and rewrite tokens.npy with the running total each time.
+    const auto old = tokens_.size();
+    tokens_.resize(old + tokens.size());
+    for (std::size_t i = 0; i < tokens.size(); ++i)
+        tokens_[old + i] = static_cast<std::int64_t>(tokens[i]);
+    write_npy(directory_ / "tokens.npy", "<i8", tokens_.size(), tokens_.data(),
+              sizeof(std::int64_t));
 }
 
 void DFlashTfDump::write_logits(std::span<const std::uint16_t> logits, std::int32_t rows,
