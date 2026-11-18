@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_519ef8d770b24e78",
+  "command": "cd /home/kv/work/ninfer && grep -n \"queue_mutex_\\|queue_cv_\" src/runtime/engine/engine_execution.inl src/runtime/engine/engine_schedule.inl src/runtime/engine/engine_requests.inl src/runtime/engine/engine_metrics.inl",
+  "commandDigest": "sha256:2510acb4208915527699afe9b113a7044a3d8b4edd3f06b768d5a7f27729de35",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:17:02.151Z",
+  "output": "src/runtime/engine/engine_execution.inl:606:        std::lock_guard lock(queue_mutex_);\nsrc/runtime/engine/engine_execution.inl:645:    queue_cv_.notify_all();\nsrc/runtime/engine/engine_schedule.inl:562:        std::lock_guard lock(queue_mutex_);\nsrc/runtime/engine/engine_schedule.inl:582:                    std::lock_guard lock(queue_mutex_);\nsrc/runtime/engine/engine_schedule.inl:752:                std::lock_guard lock(queue_mutex_);\nsrc/runtime/engine/engine_schedule.inl:1131:        std::lock_guard lock(queue_mutex_);\nsrc/runtime/engine/engine_schedule.inl:1154:        std::lock_guard lock(queue_mutex_);\nsrc/runtime/engine/engine_schedule.inl:1161:    queue_cv_.notify_all();\nsrc/runtime/engine/engine_schedule.inl:1170:            std::unique_lock lock(queue_mutex_);\nsrc/runtime/engine/engine_schedule.inl:1173:                queue_cv_.wait(lock,\nsrc/runtime/engine/engine_schedule.inl:1227:            std::unique_lock lock(queue_mutex_);\nsrc/runtime/engine/engine_schedule.inl:1228:            queue_cv_.wait_for(lock, std::chrono::milliseconds(1));\nsrc/runtime/engine/engine_requests.inl:27:        queue_cv_.notify_one();\nsrc/runtime/engine/engine_requests.inl:49:        queue_cv_.notify_one();\nsrc/runtime/engine/engine_requests.inl:115:                    queue_cv_.notify_one();\nsrc/runtime/engine/engine_requests.inl:268:    std::lock_guard lock(queue_mutex_);\nsrc/runtime/engine/engine_requests.inl:290:    queue_cv_.notify_one();\nsrc/runtime/engine/engine_requests.inl:582:        std::lock_guard lock(queue_mutex_);\nsrc/runtime/engine/engine_metrics.inl:190:        std::lock_guard lock(queue_mutex_);\n"
+}

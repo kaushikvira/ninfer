@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_f05e76b8fe72b2f1",
+  "command": "cd /home/kv/work/ninfer && grep -n \"struct ContextCacheOptions\" -B2 -A 12 include/ninfer/types.h && grep -n \"struct ContextCapacityPolicy\" -A 10 include/ninfer/types.h",
+  "commandDigest": "sha256:e035b43c27322f65ca145f20dbc258c0642f7b8f1cb209811116e1c0418157ea",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:20:21.738Z",
+  "output": "118-};\n119-\n120:struct ContextCacheOptions {\n121-    // Controls cross-request history reads and writes. Request pause/replay resources remain\n122-    // available when history is disabled.\n123-    bool enabled = true;\n124-    // Shared Host quota for StateImages, KV, pause snapshots and in-flight destinations.\n125-    // RTX 5090 defaults to 8 GiB plus eight model StateImages; DGX Spark resolves this to zero.\n126-    // This does not bound total process RAM.\n127-    // Engine::options() returns the resolved Host capacity after construction.\n128-    std::optional<std::size_t> host_capacity_bytes;\n129-    // Target spacing for optional intermediate prefill checkpoints.\n130-    std::uint32_t checkpoint_interval = 8192;\n131-};\n132-\n41:struct ContextCapacityPolicy {\n42-    ContextCapacityMode mode   = ContextCapacityMode::Automatic;\n43-    std::size_t explicit_bytes = 0;\n44-\n45-    [[nodiscard]] static constexpr ContextCapacityPolicy\n46-    explicit_capacity(std::size_t bytes) noexcept {\n47-        return ContextCapacityPolicy{ContextCapacityMode::Explicit, bytes};\n48-    }\n49-\n50-    [[nodiscard]] static constexpr ContextCapacityPolicy automatic() noexcept { return {}; }\n51-};\n"
+}

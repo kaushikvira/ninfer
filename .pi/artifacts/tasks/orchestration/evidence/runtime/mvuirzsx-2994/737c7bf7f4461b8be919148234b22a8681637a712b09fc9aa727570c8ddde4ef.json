@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_7abd2244b69f35a5",
+  "command": "cd /home/kv/work/ninfer && grep -n \"host_bytes_released\" src/models/qwen4_exp/session/session.h src/models/qwen4_exp/session/internal.h && sed -n '525,535p' src/models/qwen4_exp/session/reclaim.cpp",
+  "commandDigest": "sha256:8165f08638bb030ae6014bf49be945ce7f82864082f140f81f62c50b937d6bad",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:22:57.581Z",
+  "output": "src/models/qwen4_exp/session/session.h:325:    [[nodiscard]] std::size_t host_bytes_released(std::span<const CheckpointHandle>) const;\n        session.directory.request_maintenance();\n    }\n    return session.try_pending_maintenance();\n}\n\nstd::size_t Session::host_bytes_released(std::span<const CheckpointHandle> records) const {\n    return impl_->host_released(records);\n}\n\ncontext::RecoveryEvaluation<>\nSession::evaluate_recovery(std::span<const CheckpointHandle> advertised) const {\n"
+}

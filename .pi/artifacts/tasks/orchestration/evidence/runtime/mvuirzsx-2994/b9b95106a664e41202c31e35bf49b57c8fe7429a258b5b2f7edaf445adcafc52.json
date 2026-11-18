@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_558749d8072abc1c",
+  "command": "cd /home/kv/work/ninfer && cmake --build build/rtx5090-dev -j > /tmp/build_final.log 2>&1; echo \"BUILD EXIT: $?\"; grep -cE \"error|FAILED\" /tmp/build_final.log | sed 's/^/error-lines: /'",
+  "commandDigest": "sha256:f913c40c82d371bba3c565d7ffbf87292cbec91a21e36cb00aa10f457568bf70",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:30:00.211Z",
+  "output": "BUILD EXIT: 0\nerror-lines: 0\n"
+}

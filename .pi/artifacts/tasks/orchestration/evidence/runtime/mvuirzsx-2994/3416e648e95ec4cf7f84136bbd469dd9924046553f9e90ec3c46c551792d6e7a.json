@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_f7db3ffc4a7e2a8e",
+  "command": "cd /home/kv/work/ninfer && ls src/models/qwen4_exp/session/ src/models/glm5next/session/ 2>/dev/null && grep -n \"state_store\\|directory\\|Checkpoints checkpoints\\|kv_pools\\|checkpoint_summary\" src/models/qwen4_exp/session/internal.h | head -20",
+  "commandDigest": "sha256:cd5181db3e65e5b1e154eb80e7185ff150b11b1069d060a104535c4bd514168b",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:19:21.930Z",
+  "output": "src/models/glm5next/session/:\nbinding.cpp\ncheckpoints.cpp\ncommit.cpp\ncontext.cpp\nexecution.cpp\ninternal.h\npause.cpp\nplanning.cpp\nplanning.h\nreclaim.cpp\nrequest.cpp\nscoring.cpp\nsequence.cpp\nsession.cpp\nsession.h\n\nsrc/models/qwen4_exp/session/:\ncheckpoints.cpp\ncommit.cpp\ncontext.cpp\ncontext_execution.cpp\nexecution.cpp\ninternal.h\nplanning.cpp\nplanning.h\nreclaim.cpp\nrequest.cpp\nscoring.cpp\nsession.cpp\nsession.h\n193:    ContextOperation(context::ContextDirectory& directory, Action value,\n195:        : migration(directory), action(std::move(value)), reservation(std::move(reserved)) {}\n226:    ComputeTransaction(Kind kind, context::ContextDirectory& directory)\n227:        : kind(kind), context(directory) {}\n332:    context::ContextDirectory directory;\n333:    mutable context::RecoveryIndex<> recovery_index{directory.metadata_budget()};\n334:    Checkpoints checkpoints;\n335:    context::MetadataAccount count_storage{directory.metadata_budget()};\n"
+}

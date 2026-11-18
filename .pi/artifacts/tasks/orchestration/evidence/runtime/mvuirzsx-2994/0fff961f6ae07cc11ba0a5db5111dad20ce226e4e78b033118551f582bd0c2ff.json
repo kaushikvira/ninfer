@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_6058ec0f0449324e",
+  "command": "cd /home/kv/work/ninfer && cmake --build build/rtx5090-dev -j 2>&1 | grep -E \"error|Error|FAILED\" | head -30",
+  "commandDigest": "sha256:e32f6c89ee059089ff256218ed5c543ffa8c1d9120051f3f50e3eb3e0920ccee",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:26:08.919Z",
+  "output": "FAILED: [code=1] src/models/CMakeFiles/ninfer_model_control.dir/qwen3_5/session/checkpoints.cpp.o \n/home/kv/work/ninfer/src/models/qwen3_5/session/checkpoints.cpp:82:49: error: cannot convert ‘<brace-enclosed initializer list>’ to ‘std::span<const ninfer::models::context::CheckpointHandle>’\n/home/kv/work/ninfer/src/models/qwen3_5/session/checkpoints.cpp:86:42: error: no matching function for call to ‘ninfer::models::context::HistoryDirectory::released_pages(<brace-enclosed initializer list>)’\n/home/kv/work/ninfer/src/models/qwen3_5/session/checkpoints.cpp:89:73: error: lvalue required as unary ‘&’ operand\n/home/kv/work/ninfer/src/models/qwen3_5/session/checkpoints.cpp:89:49: error: no matching function for call to ‘ninfer::models::context::HistoryDirectory::released_pages(<brace-enclosed initializer list>)’\n/home/kv/work/ninfer/src/models/qwen3_5/session/checkpoints.cpp:91:41: error: cannot convert ‘<brace-enclosed initializer list>’ to ‘std::span<const ninfer::models::context::CheckpointHandle>’\nFAILED: [code=1] src/models/CMakeFiles/ninfer_model_control.dir/qwen4_exp/session/reclaim.cpp.o \n/home/kv/work/ninfer/src/models/qwen4_exp/session/reclaim.cpp:232:36: error: cannot convert ‘<brace-enclosed initializer list>’ to ‘std::span<const ninfer::models::context::CheckpointHandle>’\n/home/kv/work/ninfer/src/models/qwen4_exp/session/reclaim.cpp:237:35: error: cannot convert ‘<brace-enclosed initializer list>’ to ‘std::span<const ninfer::models::context::CheckpointHandle>’\n"
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_3d2c30d098da50c8",
+  "command": "cd /home/kv/work/ninfer && grep -rn \"class StateDirectory\" src/models/common/ && grep -rn \"image_bytes\\|capacity\" src/models/common/context/storage.h | head -20",
+  "commandDigest": "sha256:c563c702a223dd4f5753132b4cd804f348d5cbf500409567ddfce367317b125f",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:19:04.470Z",
+  "output": "src/models/common/context/directory/state.h:81:class StateDirectory : public MetadataOwner {\nsrc/models/common/context/directory/state.h:107:        friend class StateDirectory;\nsrc/models/common/context/directory/state.h:161:        friend class StateDirectory;\n15:[[nodiscard]] std::size_t host_context_capacity(std::optional<std::size_t> requested,\n16:                                                std::size_t image_bytes);\n25:    [[nodiscard]] std::uint32_t logical_page_capacity() const noexcept {\n26:        return spec_.logical_page_capacity;\n70:    [[nodiscard]] std::size_t mapping_capacity_elements() const noexcept;\n71:    [[nodiscard]] std::size_t copy_segment_capacity() const noexcept;\n88:    std::size_t mapping_capacity_ = 0;\n"
+}

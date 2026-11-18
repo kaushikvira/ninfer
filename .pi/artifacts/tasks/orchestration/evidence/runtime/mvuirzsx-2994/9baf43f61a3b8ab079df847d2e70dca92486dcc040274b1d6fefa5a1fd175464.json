@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_c6a383aef4100d7c",
+  "command": "cd /home/kv/work/ninfer && grep -n \"purpose\\|EnginePurpose\" src/runtime/engine/causal_score_core.h include/ninfer/types.h | head && grep -n \"struct Impl\\|core\" src/runtime/engine/engine.cpp | head -20",
+  "commandDigest": "sha256:33b2b89ea01221617cf1519548a6f78d82eaa78ecb1b979ef6bc66b45f0d25f9",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:18:16.498Z",
+  "output": "src/runtime/engine/causal_score_core.h:25:    static constexpr EnginePurpose purpose = EnginePurpose::CausalScoring;\ninclude/ninfer/types.h:33:enum class EnginePurpose : std::uint8_t {\ninclude/ninfer/types.h:159:    EnginePurpose purpose           = EnginePurpose::Generation;\n3:#include \"core/device.h\"\n4:#include \"core/nvtx.h\"\n5:#include \"core/startup.h\"\n8:#include \"runtime/engine/causal_score_core.h\"\n9:#include \"runtime/engine/engine_core.h\"\n176:    using ScoringCore    = runtime::CausalScoreCore<Qwen35>;\n182:                     std::unique_ptr<runtime::CausalScoreCore<Qwen4>>,\n184:                     std::unique_ptr<runtime::CausalScoreCore<Glm>>>;\n204:                    core = std::make_unique<runtime::CausalScoreCore<Instance>>(*instance);\n206:                    core = std::make_unique<runtime::EngineCore<Instance>>(\n214:    ~Impl() noexcept { core.emplace<std::monostate>(); }\n221:                    throw std::logic_error(\"Engine core is unavailable\");\n225:            core);\n237:    Core core;\n325:std::vector<float> Engine::score_tokens(std::vector<TokenId> tokens, std::uint32_t first_target) {\n326:    nvtx::ScopedRange score_range(nvtx::Name::Score, nvtx::Category::Scoring,\n330:        throw std::logic_error(\"score_tokens requires a CausalScoring Engine\");\n333:        throw std::invalid_argument(\"score_tokens token count must be in [2,max_context]\");\n336:        throw std::invalid_argument(\"score_tokens first_target must be in [1,token_count-1]\");\n341:        [&](auto& core) -> std::vector<float> {\n"
+}

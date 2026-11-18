@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_18ce94e60283cff1",
+  "command": "cd /home/kv/work/ninfer && grep -rn \"SessionImpl::footprint\\|SessionImpl::checkpoint_pages\\|SessionImpl::checkpoint_images\\|SessionImpl::host_released\" src/models/qwen4_exp/ && grep -rn \"image_bytes\" src/models/qwen4_exp/session/*.cpp | head",
+  "commandDigest": "sha256:ddbd2f8a0e6800a641d9df87f04666c156b0b088e7735ec4c49fe59454522db7",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:19:34.739Z",
+  "output": "src/models/qwen4_exp/session/reclaim.cpp:172:std::vector<Image> SessionImpl::checkpoint_images(std::span<const CheckpointHandle> records) const {\nsrc/models/qwen4_exp/session/reclaim.cpp:184:SessionImpl::checkpoint_pages(std::span<const CheckpointHandle> records, std::uint32_t pool) const {\nsrc/models/qwen4_exp/session/reclaim.cpp:199:ContextReleaseSet SessionImpl::footprint(std::span<const CheckpointHandle> input,\nsrc/models/qwen4_exp/session/reclaim.cpp:223:std::size_t SessionImpl::host_released(std::span<const CheckpointHandle> records) const {\nsrc/models/qwen4_exp/session/planning.cpp:21:    const auto states = count(capacity / image.image_bytes + execution.shape.max_concurrency * 2);\nsrc/models/qwen4_exp/session/planning.cpp:26:    plan.context.state = {states, {{0, {{rank, image.image_bytes, image.alignment}}}}};\nsrc/models/qwen4_exp/session/planning.cpp:67:            {i, state_part.image_bytes, state_part.alignment});\n"
+}

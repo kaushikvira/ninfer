@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_f1a2395bc0bb6faf",
+  "command": "cd /home/kv/work/ninfer && grep -rn \"struct CacheRetentionPriority\" -A 5 src/runtime/ && grep -n \"class CheckpointStore\\|capacity_for_metadata\\|struct Reservation\\|erasable\\|pins\" src/models/common/context/checkpoint_store.h | head -20",
+  "commandDigest": "sha256:abf0991d36bd0340ab7083f06c15055d225d3505bb9844830c331c3fecf7e8d4",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:20:37.741Z",
+  "output": "src/runtime/engine/context_cache/types.h:9:struct CacheRetentionPriority {\nsrc/runtime/engine/context_cache/types.h-10-    bool reused               = false;\nsrc/runtime/engine/context_cache/types.h-11-    std::uint64_t last_demand = 0;\nsrc/runtime/engine/context_cache/types.h-12-};\nsrc/runtime/engine/context_cache/types.h-13-\nsrc/runtime/engine/context_cache/types.h-14-enum class ReclaimProgress : std::uint8_t { Blocked, Changed, Transferring, Deferred, Retry };\n26:class CheckpointStore : public MetadataCatalog {\n31:        std::uint32_t pins       = 0;\n62:                if (!owner_->valid(handle_) || !owner_->slot(handle_.index).pins) std::terminate();\n63:                --owner_->slot(handle_.index).pins;\n72:        friend class CheckpointStore;\n112:        friend class CheckpointStore;\n127:    [[nodiscard]] static std::uint32_t capacity_for_metadata(std::size_t bytes) {\n158:        friend class CheckpointStore;\n217:        if (slot.generation != h.generation || slot.value || slot.pins) std::terminate();\n245:        ++slot(h.index).pins;\n249:    [[nodiscard]] bool erasable(CheckpointHandle h) const noexcept {\n250:        return valid(h) && !slot(h.index).pins;\n254:        if (!erasable(h)) throw std::logic_error(\"checkpoint retirement has no release authority\");\n267:                if (value.reserved || value.pins ||\n281:        if (!erasable(h)) return false;\n295:                if (slot(i).pins) std::terminate();\n313:            if (slot(i).value || slot(i).reserved || slot(i).pins) return;\n"
+}

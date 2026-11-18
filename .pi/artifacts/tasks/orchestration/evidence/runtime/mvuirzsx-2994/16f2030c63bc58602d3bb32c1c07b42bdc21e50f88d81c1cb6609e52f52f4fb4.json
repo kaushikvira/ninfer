@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_b472e8d33daa5aba",
+  "command": "cd /home/kv/work/ninfer && grep -n \"checkpoint_release_set\\|released_bytes\\|image_bytes\\|page_group\\|layout()\" src/models/qwen3_5/session/reclaim.cpp | head -40 && wc -l src/models/qwen3_5/session/reclaim.cpp",
+  "commandDigest": "sha256:f8aab42b36ef119aaebe76e0c900beac1c463ba353fd82df779fc9b5d63a1d2c",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:17:51.173Z",
+  "output": "75:SessionImpl::checkpoint_release_set(std::span<const CheckpointHandle> handles) const {\n147:            {group.sources, host ? 0 : states.image_bytes(),\n171:            if (!host) candidate.host_bytes += pages.layout().parts.front().record.bytes;\n192:                    pages.layout().parts.front().record.bytes;\n328:        host_bytes += expected.host_resident ? 0 : state_store->image_bytes();\n347:                host_bytes += pages.layout().parts.front().record.bytes;\n355:    const auto released = checkpoint_release_set(host_victims);\n440 src/models/qwen3_5/session/reclaim.cpp\n"
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_3c6ef80520fc8089",
+  "command": "cd /home/kv/work/ninfer && cmake --build build/rtx5090-dev -j 2>&1 | grep -E \"error|FAILED\" | head; echo \"BUILD EXIT: ${PIPESTATUS[0]}\"",
+  "commandDigest": "sha256:1fd59335281bd8052b05409bb110ebead3914eca960d7cb3c2f7e94f3439bd50",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:31:32.633Z",
+  "output": "[16/37] Linking CXX executable tests/ninfer_http_error_handler_test\nBUILD EXIT: 0\n"
+}

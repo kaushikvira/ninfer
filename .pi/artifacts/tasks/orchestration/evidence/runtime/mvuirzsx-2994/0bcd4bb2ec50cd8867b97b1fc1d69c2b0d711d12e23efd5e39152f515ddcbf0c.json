@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_78ef81dccb53b7a0",
+  "command": "cd /home/kv/work/ninfer && grep -n \"host_released\\|footprint\" src/models/qwen4_exp/session/internal.h",
+  "commandDigest": "sha256:8f5b7dc6d1dd8c83d1649afec4a7298713af7d8a79b319258ffcaf993b9fcc1d",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:23:00.678Z",
+  "output": "306:    [[nodiscard]] ContextReleaseSet footprint(std::span<const CheckpointHandle>,\n308:    [[nodiscard]] std::size_t host_released(std::span<const CheckpointHandle>) const;\n"
+}

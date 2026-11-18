@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_ec7231f413cc7391",
+  "command": "cd /home/kv/work/ninfer && ctest --test-dir build/rtx5090-dev -N 2>/dev/null | grep -iE \"config|launch|startup\" | head",
+  "commandDigest": "sha256:15987df2cd6a15633e38e0adb94f8902256c04228cd455e98402f44d2001f184",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:29:42.669Z",
+  "output": "(no output)"
+}

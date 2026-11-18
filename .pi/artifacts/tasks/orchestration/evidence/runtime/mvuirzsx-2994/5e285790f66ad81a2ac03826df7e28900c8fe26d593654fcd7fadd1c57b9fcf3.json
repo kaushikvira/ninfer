@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_fdbca4ce9434c5de",
+  "command": "cd /home/kv/work/ninfer && grep -n \"queue_mutex_\\|stats_mutex_\\|publish_runtime_stats\\|published_snapshot_\\|resident_empty\\|paused_\\|has_context_operation\\|begin_reclaim\\|checkpoint_summary\\|valid_checkpoint\\|release_checkpoint\\|kv_pools\\|instance_\\.session\" src/runtime/engine/engine_core.h | head -60",
+  "commandDigest": "sha256:283b51191c005b0ad96ec758af6d7fc95b42e2d079a7aaa14a65018051cf5295",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:16:40.474Z",
+  "output": "74:        cumulative_stats_.context_transfers.kv.resize(instance_.session->kv_pools().size());\n75:        for (const auto& pool : instance_.session->kv_pools()) {\n76:            cumulative_stats_.kv_pools.push_back({pool.id.index, std::string(pool.label), 0});\n79:        published_snapshot_.runtime = cumulative_stats_;\n80:        published_snapshot_.ranks.assign(instance_.executor->observations().begin(),\n82:        paused_.reserve(max_outstanding_);\n88:                publish_runtime_stats();\n106:            std::lock_guard lock(queue_mutex_);\n190:            std::unique_lock lock(queue_mutex_);\n241:            request->context_transfers.resize(instance_.session->kv_pools().size() + 1);\n244:                std::lock_guard lock(queue_mutex_);\n253:            std::lock_guard lock(queue_mutex_);\n268:        std::lock_guard lock(stats_mutex_);\n269:        return published_snapshot_;\n273:        std::lock_guard lock(queue_mutex_);\n282:            std::lock_guard lock(queue_mutex_);\n440:    void publish_runtime_stats();\n541:    [[nodiscard]] bool resident_empty() const noexcept;\n631:    mutable std::mutex queue_mutex_;\n632:    mutable std::mutex stats_mutex_;\n646:    std::vector<std::shared_ptr<Request>> paused_;\n662:    EngineSnapshot published_snapshot_;\n"
+}

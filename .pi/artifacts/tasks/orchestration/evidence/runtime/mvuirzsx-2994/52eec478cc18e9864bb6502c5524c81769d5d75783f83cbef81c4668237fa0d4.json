@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_99ef217b1af9307e",
+  "command": "cd /home/kv/work/ninfer && grep -n \"slots_\\[\\|slots_ =\\|slots_\\.reset\\|slots_\\.at\\|slots_\\.begin\" src/runtime/engine/engine_execution.inl src/runtime/engine/engine_schedule.inl | head -30",
+  "commandDigest": "sha256:2815486becb30fbc76821f1bd99b7342cc4216654702d955ffd7c3664c24a6df",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:30:22.211Z",
+  "output": "src/runtime/engine/engine_execution.inl:304:        const auto& request = slots_.at(lane);\nsrc/runtime/engine/engine_execution.inl:320:    const auto& request = slots_[lane];\nsrc/runtime/engine/engine_execution.inl:595:    return std::any_of(slots_.begin(), slots_.end(), [&](const auto& request) {\nsrc/runtime/engine/engine_schedule.inl:102:        if (!slots_[lane] && (!materializing_ || materializing_->destination.value != lane)) {\nsrc/runtime/engine/engine_schedule.inl:112:           std::all_of(slots_.begin(), slots_.end(), [](const auto& p) { return !p; });\nsrc/runtime/engine/engine_schedule.inl:117:    return std::any_of(slots_.begin(), slots_.end(),\nsrc/runtime/engine/engine_schedule.inl:200:        slots_[control.destination.value] = request;\nsrc/runtime/engine/engine_schedule.inl:229:            slots_[lane].reset();\nsrc/runtime/engine/engine_schedule.inl:335:    auto request = slots_[lane];\nsrc/runtime/engine/engine_schedule.inl:877:        const auto& request = slots_[lane];\nsrc/runtime/engine/engine_schedule.inl:879:        if (!oldest || request->id < slots_[*oldest]->id) { oldest = lane; }\nsrc/runtime/engine/engine_schedule.inl:887:        if (owner && slots_[*recovering]->sequence != owner)\nsrc/runtime/engine/engine_schedule.inl:891:        recovering && (slots_[*recovering]->is_prefilling() || slots_[*recovering]->is_replaying())\nsrc/runtime/engine/engine_schedule.inl:896:        const auto& request = slots_[lane];\nsrc/runtime/engine/engine_schedule.inl:911:        return slots_[a]->id < slots_[b]->id;\nsrc/runtime/engine/engine_schedule.inl:925:        const auto request = slots_[lane];\nsrc/runtime/engine/engine_schedule.inl:968:            if (oldest != lane && (!blocked || request->id > slots_[*blocked]->id)) {\nsrc/runtime/engine/engine_schedule.inl:978:    if (granted_prefill && !prepare_semantic_capture(slots_[*granted_prefill])) {\nsrc/runtime/engine/engine_schedule.inl:985:    const auto& request = slots_[lane];\nsrc/runtime/engine/engine_schedule.inl:1025:    const bool recovering = std::any_of(slots_.begin(), slots_.end(),\n"
+}

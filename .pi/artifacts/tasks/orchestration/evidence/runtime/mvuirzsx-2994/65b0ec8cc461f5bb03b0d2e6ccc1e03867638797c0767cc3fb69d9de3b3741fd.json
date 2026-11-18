@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_40fb86fe8ceae7d7",
+  "command": "cd /home/kv/work/ninfer && grep -n \"image_bytes\\|checkpoint_references\\|can_release_after\\|host_resident\\|device_resident\\|capacity\\|descriptor_index\\|StateRole role\\|content_epoch\\|valid(\" src/models/common/context/directory/state.h",
+  "commandDigest": "sha256:e4135e5a70e5db484b80f5241503c31a82d1ff7e93ca1f294c864e99f40ce4fb",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:19:10.678Z",
+  "output": "19:    [[nodiscard]] bool valid() const noexcept { return generation != 0; }\n51:    std::size_t image_bytes                     = 0;\n63:    std::uint32_t logical_capacity = 0;\n142:        [[nodiscard]] bool valid() const noexcept { return owner_ != nullptr; }\n181:    [[nodiscard]] std::size_t image_bytes(std::uint32_t rank = 0, std::uint32_t variant = 0) const;\n189:    [[nodiscard]] std::uint32_t capacity() const noexcept;\n207:    [[nodiscard]] bool valid(StateId image) const noexcept;\n208:    [[nodiscard]] std::uint32_t descriptor_index(StateId image) const;\n209:    [[nodiscard]] StateRole role(StateId image) const;\n211:    [[nodiscard]] bool device_resident(StateId image) const;\n212:    [[nodiscard]] bool host_resident(StateId image) const;\n213:    [[nodiscard]] std::uint64_t content_epoch(StateId image) const;\n215:    [[nodiscard]] std::uint32_t checkpoint_references(StateId image) const;\n253:    can_release_after_checkpoint_references(StateId image, std::uint32_t released_references) const;\n259:        std::uint64_t content_epoch = 0;\n269:        std::uint32_t checkpoint_references = 0;\n274:        StateRole role          = StateRole::Free;\n283:    [[nodiscard]] std::optional<StateId> allocate(std::uint32_t index, StateRole role,\n311:    std::uint64_t next_content_epoch_ = 0;\n"
+}

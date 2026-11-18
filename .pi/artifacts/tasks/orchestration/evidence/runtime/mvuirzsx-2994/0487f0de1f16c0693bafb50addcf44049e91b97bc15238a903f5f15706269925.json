@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_9fcc1bbcd323c3c5",
+  "command": "cd /home/kv/work/ninfer && grep -n \"host_released\" src/models/glm5next/session/*.cpp src/models/glm5next/session/internal.h && sed -n '280,340p' src/models/glm5next/session/session.h && grep -n \"struct CheckpointSummary\" -A 8 src/models/glm5next/session/session.h src/models/qwen4_exp/session/session.h",
+  "commandDigest": "sha256:19694036b94bb4fe8e841742011efba950d68e58f1dcc0e3d06e26bc545563d8",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 1,
+  "observedAt": "2026-10-30T05:19:52.412Z",
+  "output": "(no output)\n\nCommand exited with code 1"
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_49e2ac64f34be1c2",
+  "command": "cd /home/kv/work/ninfer && sed -n '190,200p' src/models/qwen3_5/session/session.cpp",
+  "commandDigest": "sha256:599878f4f2d64bc41ae6b2a20a2ca85ba2cceff8052ae55d3826026a0968cfe3",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:22:52.173Z",
+  "output": "}\n\nbool Session::revoke_snapshot(ResumeState& paused) noexcept {\n    return impl_->revoke_snapshot(paused);\n}\n\nstd::size_t Session::host_bytes_released(std::span<const CheckpointHandle> checkpoints) const {\n    return impl_->host_bytes_released(checkpoints);\n}\n\nstd::size_t Session::release_redundant_host(std::span<const CheckpointHandle> excluded,\n"
+}

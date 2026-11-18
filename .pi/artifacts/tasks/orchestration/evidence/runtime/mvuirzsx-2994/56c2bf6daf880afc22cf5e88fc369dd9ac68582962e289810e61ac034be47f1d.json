@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_76c261f8afd128cb",
+  "command": "cd /home/kv/work/ninfer && ctest --test-dir build/rtx5090-dev -R 'admin_cache|serve_options|runtime_mechanisms|metrics_test|prefix_admin' --output-on-failure 2>&1 | tail -14",
+  "commandDigest": "sha256:4429ef7f21977b37a460e8e02d197c7b456e01bb9d7d7b2c77e394b84c42e111",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:31:37.426Z",
+  "output": "4/5 Test #67: ninfer_qwen3_5_runtime_mechanisms_test ...   Passed    0.01 sec\n    Start 73: ninfer_qwen3_5_prefix_admin_real_test\n5/5 Test #73: ninfer_qwen3_5_prefix_admin_real_test ....***Skipped   0.02 sec\n\n100% tests passed, 0 tests failed out of 5\n\nLabel Time Summary:\ngpu     =   0.02 sec*proc (1 test)\nreal    =   0.02 sec*proc (1 test)\n\nTotal Test time (real) =   0.04 sec\n\nThe following tests did not run:\n\t 73 - ninfer_qwen3_5_prefix_admin_real_test (Skipped)\n"
+}

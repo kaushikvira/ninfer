@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_b2d6e0bb7b47fd40",
+  "command": "cd /home/kv/work/ninfer && ctest --test-dir build/rtx5090-dev -R 'runtime_mechanisms|metrics_test|http_error|openai|anthropic|config' 2>&1 | tail -15",
+  "commandDigest": "sha256:9b4da04be9cfb44a306706537bc454fd04043e0ff81606f58640d9755a08b8c9",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:29:39.892Z",
+  "output": "2/7 Test #55: ninfer_openai_responses_test .............   Passed    0.00 sec\n    Start 56: ninfer_openai_responses_store_test\n3/7 Test #56: ninfer_openai_responses_store_test .......   Passed    0.00 sec\n    Start 57: ninfer_anthropic_schema_test\n4/7 Test #57: ninfer_anthropic_schema_test .............   Passed    0.00 sec\n    Start 60: ninfer_metrics_test\n5/7 Test #60: ninfer_metrics_test ......................   Passed    0.00 sec\n    Start 61: ninfer_http_error_handler_test\n6/7 Test #61: ninfer_http_error_handler_test ...........   Passed    0.02 sec\n    Start 67: ninfer_qwen3_5_runtime_mechanisms_test\n7/7 Test #67: ninfer_qwen3_5_runtime_mechanisms_test ...   Passed    0.02 sec\n\n100% tests passed, 0 tests failed out of 7\n\nTotal Test time (real) =   0.07 sec\n"
+}

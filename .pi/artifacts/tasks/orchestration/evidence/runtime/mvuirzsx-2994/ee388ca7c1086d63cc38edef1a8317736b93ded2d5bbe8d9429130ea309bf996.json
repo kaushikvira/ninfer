@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_50365acc3f61fc2c",
+  "command": "cd /home/kv/work/ninfer && ctest --test-dir build/rtx5090-dev -LE 'gpu|real' 2>&1 | tail -6",
+  "commandDigest": "sha256:87d2e99ba2a312ffa1d24f00cd0243b7ddb5cc943c8511ea8d64cdfa239a7d90",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:43:21.498Z",
+  "output": "\t192 - ninfer_moe_block_scaled_test (Failed)             ops\n\t193 - ninfer_moe_ep_test (Failed)                       ops\n\t194 - ninfer_ple_test (Failed)                          ops\nErrors while running CTest\nOutput from these tests are in: /home/kv/work/ninfer/build/rtx5090-dev/Testing/Temporary/LastTest.log\nUse \"--rerun-failed --output-on-failure\" to re-run the failed cases verbosely.\n"
+}

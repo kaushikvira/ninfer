@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_e76c42ada9e95dff",
+  "command": "cd /home/kv/work/ninfer && grep -rn \"host_bytes_released\" src/models/glm5next/session/*.cpp src/models/qwen4_exp/session/*.cpp | head && grep -rn \"footprint\\|host_bytes_released\" src/models/glm5next/session/internal.h",
+  "commandDigest": "sha256:41e50f5c4a74b2bae4c0b5e087e0d0eea53ff66095a51f90338d2538eea0cfc5",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:22:43.105Z",
+  "output": "src/models/glm5next/session/reclaim.cpp:190:std::size_t Session::host_bytes_released(std::span<const CheckpointHandle> records) const {\nsrc/models/qwen4_exp/session/reclaim.cpp:530:std::size_t Session::host_bytes_released(std::span<const CheckpointHandle> records) const {\n275:    [[nodiscard]] ContextReleaseSet footprint(std::span<const CheckpointHandle>,\n"
+}

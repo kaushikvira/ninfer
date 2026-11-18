@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_73b2e0bfdaa12820",
+  "command": "cd /home/kv/work/ninfer && grep -n \"ninfer_qwen3_5_real_tests\\|prefix_real_test\" tests/models/qwen3_5/tests.cmake | head && sed -n '/set(ninfer_qwen3_5_real_tests/,/)/p' tests/models/qwen3_5/tests.cmake | head -25",
+  "commandDigest": "sha256:f6b7dbfe140c6f4a073165cd76871d843e5513cceed6d37ef79e8de0f2f178f8",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:28:19.388Z",
+  "output": "29:ninfer_add_test(ninfer_qwen3_5_prefix_real_test\n32:ninfer_test_interpose(ninfer_qwen3_5_prefix_real_test cudaEventQuery)\n35:  COMMAND ninfer_qwen3_5_prefix_real_test)\n81:  COMMAND ninfer_qwen3_5_prefix_real_test)\n86:set(ninfer_qwen3_5_real_tests\n90:  ninfer_qwen3_5_prefix_real_test\n103:set_tests_properties(${ninfer_qwen3_5_real_tests} PROPERTIES\nset(ninfer_qwen3_5_real_tests\n  ninfer_qwen3_5_loading_real_test\n  ninfer_qwen3_5_native_transactions_test\n  ninfer_qwen3_5_mtp_history_real_test\n  ninfer_qwen3_5_prefix_real_test\n  ninfer_qwen3_5_terminal_publication_real_test\n  ninfer_qwen3_5_agent_continuation_real_test\n  ninfer_qwen3_5_preemption_real_test\n  ninfer_qwen3_5_grammar_real_test\n  ninfer_qwen3_5_tools_real_test\n  ninfer_qwen3_5_score_real_test\n  ninfer_qwen3_5_vision_workspace_test\n  ninfer_qwen3_5_dflash2_real_test\n  ninfer_qwen3_5_dflash_prefill_real_test\n  ninfer_qwen3_5_moe_real_test\n  ninfer_qwen3_5_moe_offload_real_test\n  ninfer_qwen3_5_dflash_real_test)\n"
+}

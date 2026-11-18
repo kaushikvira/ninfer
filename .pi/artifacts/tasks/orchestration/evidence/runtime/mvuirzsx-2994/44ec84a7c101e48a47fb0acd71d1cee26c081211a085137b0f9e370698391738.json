@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_935e3a05d78f212b",
+  "command": "cd /home/kv/work/ninfer && for f in /home/kv/models/qwen36-35b-a3b/qwen3_6_35b_a3b.ninfer /home/kv/models/swift15-v2/qwen3_8_27b_swift15_v2.ninfer; do echo \"== $f\"; python3 -c \"import json,sys; d=json.load(open('$f'.replace('.ninfer','')+'.json'))\" 2>/dev/null; done; ls /home/kv/models/ 2>/dev/null",
+  "commandDigest": "sha256:a1c0d14a199c797286a1e5211666c24b8a9928a074ba188aa232a3afba6e2350",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:29:15.599Z",
+  "output": "== /home/kv/models/qwen36-35b-a3b/qwen3_6_35b_a3b.ninfer\n== /home/kv/models/swift15-v2/qwen3_8_27b_swift15_v2.ninfer\nbreeze-tts-2\ncalib-v3\ndeepseek-v41-1017-gsq\ndeepseek-v41-gsq\ndiffusiongemma-26B-A4B-it-NVFP4\ndiffusiongemma-26B-A4B-it-Q4_K_M.gguf\ngemma4-26b-a4b-it-assistant\ngemma4-26b-a4b-nvfp4\nhy-memory-30b\nlost+found\nqwen3-tts\nqwen36-35b-a3b\nqwen36-35b-a3b-nvfp4\nqwen38-27b-nvfp4-hf\nswift15-bf16\nswift15-groupwise-int\nswift15-nvfp4full\nswift15-v2\nswift15-v2-nvfp4mlp-hf\nswift15-v3\nthinkingcap-nvfp4full\nz-lab-dflash2\n"
+}

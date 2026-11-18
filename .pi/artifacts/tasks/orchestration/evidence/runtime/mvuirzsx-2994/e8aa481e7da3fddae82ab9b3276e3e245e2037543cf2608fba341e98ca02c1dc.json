@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_ba563f6f1f58446b",
+  "command": "cd /home/kv/work/ninfer && ls src/models/qwen3_5/session/ && grep -rn \"host_bytes_released\" src/models/qwen3_5/ | head",
+  "commandDigest": "sha256:b0554f6c862bfcb2884104282a1366e53c769e0206f95eb460dd6f156c369abb",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:17:44.623Z",
+  "output": "binding.cpp\ncapture.cpp\ncheckpoints.cpp\ncommit.cpp\ncontext_operation.cpp\nexecution.cpp\ninternal.h\npause.cpp\nreclaim.cpp\nrequest.cpp\nscoring.cpp\nsequence.cpp\nsession.cpp\nsession.h\nsource.cpp\nsrc/models/qwen3_5/session/internal.h:320:    host_bytes_released(std::span<const CheckpointHandle> checkpoints) const;\nsrc/models/qwen3_5/session/checkpoints.cpp:68:std::size_t SessionImpl::host_bytes_released(std::span<const CheckpointHandle> handles) const {\nsrc/models/qwen3_5/session/session.cpp:196:std::size_t Session::host_bytes_released(std::span<const CheckpointHandle> checkpoints) const {\nsrc/models/qwen3_5/session/session.cpp:197:    return impl_->host_bytes_released(checkpoints);\nsrc/models/qwen3_5/session/session.h:369:    host_bytes_released(std::span<const CheckpointHandle> checkpoints) const;\n"
+}

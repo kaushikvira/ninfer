@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_acc14c9804dbf9a5",
+  "command": "cd /home/kv/work/ninfer && sed -n '100,115p' tests/models/qwen3_5/tests.cmake",
+  "commandDigest": "sha256:579ba3c7aa8821f2e6967cee426549ac71583fcb1feb904d6bb224838b505b7c",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:28:22.263Z",
+  "output": "  ninfer_qwen3_5_moe_real_test\n  ninfer_qwen3_5_moe_offload_real_test\n  ninfer_qwen3_5_dflash_real_test)\nset_tests_properties(${ninfer_qwen3_5_real_tests} PROPERTIES\n  SKIP_RETURN_CODE 77\n  RUN_SERIAL TRUE\n  LABELS \"gpu;real\")\n\nset_tests_properties(\n  ninfer_qwen3_5_state_image_test\n  PROPERTIES SKIP_RETURN_CODE 77 LABELS \"gpu\")\n"
+}

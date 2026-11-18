@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_b2be7d75ad811257",
+  "command": "cd /home/kv/work/ninfer && grep -n \"snapshot\\|media_cache\\|memory_summary\\|runtime_stats\" include/ninfer/engine.h src/runtime/engine/engine.cpp | head -40",
+  "commandDigest": "sha256:a408cc5a2340fbf602d4e21d28f889d59b9fef8cee6efcb6c601f0f3adbbd056",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:16:42.084Z",
+  "output": "include/ninfer/engine.h:55:    // released and the corresponding Engine snapshot is published.\ninclude/ninfer/engine.h:118:    [[nodiscard]] EngineSnapshot snapshot() const;\nsrc/runtime/engine/engine.cpp:227:            [](const auto& instance) { return instance->frontend.media_cache_summary(); }, active);\nsrc/runtime/engine/engine.cpp:485:EngineSnapshot Engine::snapshot() const {\nsrc/runtime/engine/engine.cpp:493:                return core->snapshot();\nsrc/runtime/engine/engine.cpp:497:        std::visit([](const auto& instance) { return instance->frontend.media_cache_summary(); },\n"
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_2f244c4429d9e8e9",
+  "command": "cd /home/kv/work/ninfer && sed -n '300,312p' src/models/qwen4_exp/session/internal.h",
+  "commandDigest": "sha256:3992446fa1426badff13f11c4b496f897b1672435430cd9e853f30fa09bf778a",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:23:02.691Z",
+  "output": "    [[nodiscard]] PreparedCheckpoint prepare_checkpoint(Sequence&);\n    [[nodiscard]] std::optional<CheckpointHandle> detach(Sequence&, runtime::CheckpointRole,\n                                                         PreparedCheckpoint = {});\n    [[nodiscard]] std::vector<context::PageId> checkpoint_pages(std::span<const CheckpointHandle>,\n                                                                std::uint32_t pool) const;\n    [[nodiscard]] std::vector<Image> checkpoint_images(std::span<const CheckpointHandle>) const;\n    [[nodiscard]] ContextReleaseSet footprint(std::span<const CheckpointHandle>,\n                                              bool released) const;\n    [[nodiscard]] std::size_t host_released(std::span<const CheckpointHandle>) const;\n    [[nodiscard]] std::shared_ptr<Demotion> demotion(std::span<const CheckpointHandle>) const;\n    [[nodiscard]] ContextDemotion describe_demotion(std::shared_ptr<const Demotion>) const;\n    [[nodiscard]] ContextDemotion combine_demotions(std::span<const ContextDemotion>) const;\n    [[nodiscard]] ContextReclaimPlan plan_reclaim(std::span<const CheckpointHandle>,\n"
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_ce8fbfe1be0b2f81",
+  "command": "cd /home/kv/work/ninfer && grep -n \"Field::Vision,\\|Field::CudaGraph,\\|Field::GpuTiming,\\|Field::RawOutput,\\|Field::PrintTokenIds,\" src/product/config/schema.cpp",
+  "commandDigest": "sha256:fbdd441a1fb37c65017d04206313277dfa7311529cfdd72d1db52829ed3fb3e9",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:28:51.238Z",
+  "output": "16:    {Field::Vision, \"model.vision\", \"--vision\", \"--no-vision\", \"\", \"Load Vision resources.\"},\n34:    {Field::CudaGraph, \"engine.cuda_graph\", \"--cuda-graph\", \"--no-cuda-graph\", \"\",\n36:    {Field::GpuTiming, \"observability.gpu_timing\", \"--gpu-timing\", \"--no-gpu-timing\", \"\",\n120:    {Field::RawOutput, \"cli.raw_output\", \"--raw-output\", \"--no-raw-output\", \"\",\n122:    {Field::PrintTokenIds, \"cli.print_token_ids\", \"--print-token-ids\", \"--no-print-token-ids\", \"\",\n"
+}

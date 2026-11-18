@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_165a4197e4a6f241",
+  "command": "cd /home/kv/work/ninfer && grep -n \"class StateDirectory\\|image_bytes\\|capacity\\|host_resident\\|device_resident\\|checkpoint_references\\|can_release_after\\|source_pins\\|valid(\" src/models/common/context/directory.h | head -40",
+  "commandDigest": "sha256:d715e1fda06eb421794d4dd8bb92e8320bb74eab759da43e3e1739f99490cb2d",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:19:02.611Z",
+  "output": "20:    std::uint32_t page_capacity = 0;\n37:    [[nodiscard]] bool valid() const noexcept {\n"
+}

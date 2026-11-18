@@ -1,0 +1,28 @@
+[
+  {
+    "id": "mvuirzsx-2994",
+    "agentType": "coder",
+    "description": "Implement admin prefix-cache API",
+    "sessionName": "task-mvuirzsx-2994",
+    "startedAt": 1793337390613,
+    "paneId": "w1B:p2",
+    "handle": {
+      "backend": "herdr",
+      "resourceId": "w1B:p2",
+      "socketPath": "/home/kv/.config/herdr/herdr.sock",
+      "terminalId": "term_65f07e5eafb6568",
+      "parentPaneId": "w1B:p1",
+      "agentName": "coder-mvuirzsx",
+      "tabId": "w1B:t2",
+      "ownsTab": true
+    },
+    "piDir": "/home/kv/work/ninfer/.pi",
+    "dir": "/home/kv/work/ninfer/.pi/artifacts/tasks",
+    "cwd": "/home/kv/work/ninfer",
+    "model": "litellm/claude-sonnet-5",
+    "status": "running",
+    "background": true,
+    "taskId": "mvuirzsx-2994",
+    "sessionRef": "/home/kv/work/ninfer/.pi/artifacts/tasks/sessions/mvuirzsx-2994/2026-10-30T05-16-27-352Z_01a18b3c-e957-766c-bfbf-1291871cc2ca.jsonl"
+  }
+]

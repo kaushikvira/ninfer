@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_b5981cade7e3c4d6",
+  "command": "cd /home/kv/work/ninfer && grep -rn \"released_pages\\|released_histories\" src/models/common/context/directory/history.h | head && grep -rn \"kTextKvPool\\|kBackendKvPool\" src/models/qwen3_5/definition.h src/models/qwen3_5/*.h 2>/dev/null | head && grep -rn \"kv_pools\" src/models/qwen3_5/session/session.cpp | head -5",
+  "commandDigest": "sha256:3b2d3cd9f27f926283ffbb2dd3d34fd73e80ffad3d6c1faedda31a7a433f0e5b",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:19:14.307Z",
+  "output": "244:    released_pages(std::span<const HistoryPrefix* const> removed) const;\n246:    released_histories(std::span<const HistoryPrefix* const> removed) const;\n249:    [[nodiscard]] std::vector<PageId> released_pages(HistoryId owner) const;\n250:    [[nodiscard]] std::vector<HistoryId> released_histories(HistoryId owner) const;\nsrc/models/qwen3_5/planning.h:41:inline constexpr runtime::KvPoolId kTextKvPool{0};\nsrc/models/qwen3_5/planning.h:42:inline constexpr runtime::KvPoolId kBackendKvPool{1};\n119:std::span<const runtime::KvPoolDescriptor> Session::kv_pools() const noexcept {\n120:    return impl_->plan.kv_pools;\n"
+}

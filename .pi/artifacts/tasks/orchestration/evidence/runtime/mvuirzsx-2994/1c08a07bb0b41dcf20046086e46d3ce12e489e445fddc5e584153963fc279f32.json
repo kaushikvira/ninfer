@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_dcb2434b2754687e",
+  "command": "cd /home/kv/work/ninfer && ctest --test-dir build/rtx5090-dev -R 'prefix_admin' --output-on-failure 2>&1 | tail -8",
+  "commandDigest": "sha256:587283d0e31c02579108ec6673c0e485d95e9f09b5a186828ef4c492ddec6019",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:29:05.650Z",
+  "output": "Label Time Summary:\ngpu     =   0.05 sec*proc (1 test)\nreal    =   0.05 sec*proc (1 test)\n\nTotal Test time (real) =   0.05 sec\n\nThe following tests did not run:\n\t 73 - ninfer_qwen3_5_prefix_admin_real_test (Skipped)\n"
+}

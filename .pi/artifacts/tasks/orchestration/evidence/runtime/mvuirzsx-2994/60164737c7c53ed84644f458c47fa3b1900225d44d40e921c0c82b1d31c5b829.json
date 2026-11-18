@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_6bf24343817dc710",
+  "command": "cd /home/kv/work/ninfer && cmake --build build/rtx5090-dev -j 2>&1 | grep -E \"error|FAILED|ninja: build|no work\" | head -20; echo \"EXIT: $?\"",
+  "commandDigest": "sha256:7fe462b505f352c277e233957a5f1716692b9414a5f210ffde6c33832c1295c2",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:28:38.054Z",
+  "output": "[80/530] Generating CXX dyndep file tests/CMakeFiles/ninfer_http_error_handler_test.dir/CXX.dd\nEXIT: 0\n"
+}

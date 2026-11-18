@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_d4157077374d6666",
+  "command": "cd /home/kv/work/ninfer && sed -n '78,110p' src/models/glm5next/session/reclaim.cpp",
+  "commandDigest": "sha256:de9dfc01c4b0190a2dd150269c149cf18bcac4ac853f83a6a7075f73d739390b",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:23:23.486Z",
+  "output": "ContextReleaseSet SessionImpl::footprint(std::span<const CheckpointHandle> input,\n                                         bool released) const {\n    ContextReleaseSet result;\n    if (released) {\n        if (std::any_of(input.begin(), input.end(),\n                        [&](auto handle) { return !checkpoints.erasable(handle); }))\n            return result;\n        const auto facts = physical_facts(*this, input);\n        auto selected    = facts.inventory->select();\n        auto probe       = selected.probe(input);\n        return selected.released();\n    }\n    for (const auto image : checkpoint_images(input)) result.merge(directory.state_release(image));\n    for (std::uint16_t pool = 0; pool < directory.pool_count(); ++pool) {\n        for (const auto page : checkpoint_pages(input, pool)) {\n            const auto facts = directory.page_release(page);\n            result.records.insert(result.records.end(), facts.records.begin(), facts.records.end());\n            result.pages.push_back(page);\n        }\n    }\n    result.normalize();\n    return result;\n}\n\ncontext::ReleasePlan<ContextRelease, ContextReleaseSet>\nSessionImpl::plan_releases(std::span<const CheckpointHandle> allowed,\n                           std::span<const CheckpointHandle> excluded, const ContextDemand&) const {\n    auto facts = physical_facts(*this, allowed, excluded);\n    context::ReleasePlan<ContextRelease, ContextReleaseSet> result{{}, facts.inventory};\n    if (operation) return result;\n    auto selected = facts.inventory->select();\n    for (const auto& group : facts.groups) {\n        auto probe = selected.probe(group.sources);\n"
+}

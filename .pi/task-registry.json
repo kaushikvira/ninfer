@@ -1,0 +1,24 @@
+[
+  {
+    "id": "mvuirzsx-2994",
+    "agentType": "coder",
+    "description": "Implement admin prefix-cache API",
+    "sessionName": "task-mvuirzsx-2994",
+    "startedAt": 1793337390613,
+    "handle": {
+      "backend": "herdr",
+      "resourceId": "w1B:p2",
+      "socketPath": "/home/kv/.config/herdr/herdr.sock",
+      "terminalId": "term_65f07e5eafb6568",
+      "parentPaneId": "w1B:p1",
+      "agentName": "coder-mvuirzsx",
+      "tabId": "w1B:t2",
+      "ownsTab": true
+    },
+    "piDir": "/home/kv/work/ninfer/.pi",
+    "dir": "/home/kv/work/ninfer/.pi/artifacts/tasks",
+    "cwd": "/home/kv/work/ninfer",
+    "model": "litellm/claude-sonnet-5",
+    "backend": "herdr"
+  }
+]

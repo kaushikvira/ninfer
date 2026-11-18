@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "mvuirzsx-2994",
+  "producerTaskId": "mvuirzsx-2994",
+  "sessionDigest": "sha256:8e590a62deaa169a00c763c8756b88e42929435d28e13d4e97cbe763df54fe38",
+  "toolCallId": "call_8cc4d690535de860",
+  "command": "cd /home/kv/work/ninfer && ls build/rtx5090-dev/tests/ | grep prefix_admin; echo \"---\"; NINFER_TEST_ARTIFACT=/home/kv/models/qwen36-35b-a3b/qwen3_6_35b_a3b.ninfer CUDA_VISIBLE_DEVICES=0 timeout 600 ./build/rtx5090-dev/tests/ninfer_qwen3_5_prefix_admin_real_test 2>&1 | tail -30; echo \"EXIT: ${PIPESTATUS[0]}\"",
+  "commandDigest": "sha256:c6825f9ae9d2cb2aa7d8e95f72ca44a4abf9a51a660e17f62a00cc31651ffccf",
+  "cwd": "/home/kv/work/ninfer",
+  "exitCode": 0,
+  "observedAt": "2026-10-30T05:29:28.171Z",
+  "output": "ninfer_qwen3_5_prefix_admin_real_test\n---\nprefix admin failed: cudaSetDevice failed: cudaErrorMemoryAllocation: out of memory\nEXIT: 1\n"
+}
