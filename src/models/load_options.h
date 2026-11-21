@@ -24,7 +24,16 @@ struct LoadOptions {
 
     [[nodiscard]] bool dspine() const noexcept { return speculative == SpeculativeBackend::Dspine; }
 
-    [[nodiscard]] bool masked_draft() const noexcept { return dflash() || dflash2(); }
+    // The masked-block drafter family: a draft that arranges one (K+1)-wide masked block, owns a
+    // context key/value history of its own, and has its rows' `backend_frontier` advanced by the
+    // committed prefix rather than by one token per step. DSpine is that shape - block 16, one
+    // anchor column plus K in [1,15] drafts, target taps in, a paged context per draft layer - so
+    // it joins the gates that give a drafter its frame, its context KV and its (K+1)-wide verify
+    // block (frames.cpp:165, planning/startup.cpp:94-108, session/sequence.cpp:74). DFlash and
+    // DFlash2 answer exactly as they did: the set they were in is unchanged.
+    [[nodiscard]] bool masked_draft() const noexcept {
+        return dflash() || dflash2() || dspine();
+    }
 
     [[nodiscard]] bool proposal_enabled() const noexcept {
         return purpose == EnginePurpose::Generation && speculative != SpeculativeBackend::None &&
@@ -49,7 +58,8 @@ struct LoadOptions {
 };
 
 [[nodiscard]] constexpr bool is_masked_draft_backend(SpeculativeBackend backend) noexcept {
-    return backend == SpeculativeBackend::DFlash || backend == SpeculativeBackend::DFlash2;
+    return backend == SpeculativeBackend::DFlash || backend == SpeculativeBackend::DFlash2
+        || backend == SpeculativeBackend::Dspine;
 }
 
 [[nodiscard]] inline LoadOptions load_options(const EngineOptions& options) noexcept {

@@ -108,6 +108,16 @@ struct ProposalParameters {
     std::uint32_t rows = 0;
 };
 
+// The DSpine streams the proposal TAIL (execution::dspine_propose_tail) names by weight: the
+// final norm and the code bridge's gate bias it hands `dspine_serial_scores`, and the bridge's
+// two serial tables, tg [vocabulary, rank] and tsv [vocabulary, 2 rank]. They are the drafter's
+// own materialized objects: the tail gathers them by candidate id inside its kernel, so no copy
+// of a table is taken and no second representation exists (D-31, D-35, D-37).
+struct DspineTailParameters {
+    Tensor final_norm, gate_bias;
+    Weight tg, tsv;
+};
+
 // Cold native preparation for the fixed model implementation. This owner is stable before
 // startup sizing, execution, or Graph capture; all weight addresses borrow the source ModelShard.
 // Shape-dependent kernel selection and scratch remain with the calling implementation and Op.
@@ -125,6 +135,7 @@ public:
     std::optional<MtpParameters> mtp;
     std::optional<qwen::VisionParameters> vision;
     std::optional<DraftParameters> draft;
+    std::optional<DspineTailParameters> dspine;
     std::optional<ProposalParameters> proposal;
 };
 

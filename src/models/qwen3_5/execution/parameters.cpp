@@ -255,6 +255,17 @@ Parameters::Parameters(const ModelShard& source, std::shared_ptr<const ModelProf
         draft = with_context(std::string(this->profile->options.speculative_component()),
                              [&] { return prepare.draft(*w.draft); });
     }
+    if (w.dspine) {
+        dspine = with_context(std::string(this->profile->options.speculative_component()), [&] {
+            const auto& source = *w.dspine;
+            DspineTailParameters out;
+            out.final_norm = prepare.tensor(source.final_norm);
+            out.gate_bias  = prepare.tensor(source.bridge.gate_bias);
+            out.tg         = native_weight(model.weight(source.bridge.tg).view);
+            out.tsv        = native_weight(model.weight(source.bridge.tsv).view);
+            return out;
+        });
+    }
     if (w.proposal) {
         proposal =
             ProposalParameters{prepare.linear(w.proposal->head), std::nullopt, w.proposal->rows};

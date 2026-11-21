@@ -1,10 +1,12 @@
 #include "models/qwen3_5/program/internal.h"
 #include "models/qwen3_5/execution/draft.h"
+#include "models/qwen3_5/execution/dspine.h"
 #include "models/qwen3_5/execution/text.h"
 #include "ninfer/ops/sequence.h"
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 #include <stdexcept>
 
 namespace ninfer::models::qwen3_5::detail {
@@ -92,6 +94,43 @@ void RankProgramImpl::run_dflash_draft(std::uint32_t batch_value, std::uint32_t 
     execution::draft_propose(draft_view(*this), inputs, outputs, envelopes);
 }
 
+// The DSpine draft seam: the same shape of call the decode loop already makes for DFlash2
+// (run_dflash_draft above), for the backend whose proposal tail lives in
+// execution::dspine_propose_tail. It hands the round the last bridge's three streams, the
+// normed proposal block, the row anchors and the draw positions, and receives drafts,
+// candidate_ids and proposal_q in the frame's accept-layout streams - the same three streams
+// decide_decode then hands `speculative_accept_sparse_drafts`, which is why the accepted-token
+// accounting needs no DSpine arm at all (decision.cpp:204-211 reads the accept op's counts).
+void RankProgramImpl::run_dspine_draft(std::uint32_t batch_value) {
+    auto& frame = resources.frame;
+    auto& draft = *frame.dflash;
+    const int batch = static_cast<int>(batch_value);
+    const auto& dspine = parameters.profile->config.dspine;
+    if (!parameters.dspine || !dspine)
+        throw std::logic_error("run_dspine_draft: the model carries no dspine drafter");
+    const execution::DspineTailView view{parameters.text.output_head.weight,
+                                         parameters.dspine->final_norm,
+                                         parameters.dspine->gate_bias,
+                                         parameters.dspine->tg,
+                                         parameters.dspine->tsv,
+                                         static_cast<int>(dspine->bridge.rank)};
+    execution::DspineTailInputs inputs{
+        dense_prefix(draft.bridge_raw, {frame.spec.hidden, int(draft_window) + 1, batch}),
+        dense_prefix(draft.bridge_rms, {(int(draft_window) + 1) * batch}),
+        draft.bridge_message,
+        dense_prefix(draft.proposal_hidden, {frame.spec.hidden, int(draft_window) + 1, batch}),
+        frame.anchors.slice(0, 0, batch), frame.sampling_positions.slice(0, 0, batch),
+        frame.sampling};
+    execution::DspineTailOutputs outputs{
+        dense_prefix(draft.drafts, {static_cast<int>(draft_window), batch}),
+        dense_prefix(draft.candidate_ids,
+                     {draft.candidate_ids.ne[0], static_cast<int>(draft_window), batch}),
+        dense_prefix(draft.proposal_q,
+                     {draft.proposal_q.ne[0], static_cast<int>(draft_window), batch})};
+    execution::dspine_propose_tail(view, inputs, outputs, resources.work,
+                                   device.execution_view());
+}
+
 void RankProgramImpl::begin_draft(ComputeOperation& operation) {
     auto& frame           = resources.frame;
     const int batch       = static_cast<int>(operation.shape.rows);
@@ -108,6 +147,8 @@ void RankProgramImpl::begin_draft(ComputeOperation& operation) {
                             device.execution_view());
     } else if (backend == SpeculativeBackend::Mtp) {
         begin_mtp_draft(operation);
+    } else if (backend == SpeculativeBackend::Dspine) {
+        run_dspine_draft(operation.shape.rows);
     } else {
         run_dflash_draft(operation.shape.rows, minimum, maximum);
     }

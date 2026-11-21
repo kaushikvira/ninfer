@@ -27,6 +27,23 @@ set_tests_properties(ninfer_qwen3_5_dspine_real_test PROPERTIES
 # The accept-side row of the round (`serial_tail_accept_q_error`, the contract the drafts the
 # serial tail publishes must satisfy before `speculative_accept_sparse_drafts` will take them) is
 # the engine's own host code, compiled in as the tail's own unit test compiles it.
+# P2 stage 4: the DSpine decode + accept seam, on the device and on a real V3-tailored artifact.
+# It drives the new execution::dspine_propose_tail (the drafter's own head, tg/tsv tables and
+# final norm) and hands its published drafts, candidate_ids and proposal_q to the engine's ONE
+# sparse verifier - the call program/decision.cpp:84-93 makes for DFlash2 - over N>=8 rounds,
+# with a planted argmax prefix per round and two teeth arms. It reports accepted tokens per
+# round, the number D-40 put the project's bar at (DFlash2 K=7: 2.998). The target arm is analytic
+# and says so in its own line: a real 27 B tower and a DSpine drafter do not coexist on one card
+# here (D-42), so the V3 A/B is the a5000-2 lane's. Links the execution target because the seam
+# under test is execution code; the accept-side contract checker is the engine's host code,
+# compiled in as the tail's own unit test compiles it. Skips, exit 77, without the two envs.
+ninfer_add_test(ninfer_qwen3_5_dspine_accept_real_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_accept_real.cpp"
+          "${PROJECT_SOURCE_DIR}/src/models/common/dspine/dspine_serial_tail.cpp"
+  LIBRARIES ninfer_model_loading ninfer_ops ninfer_model_execution)
+set_tests_properties(ninfer_qwen3_5_dspine_accept_real_test PROPERTIES
+  SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 900)
+
 ninfer_add_test(ninfer_qwen3_5_dspine_forward_real_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_forward_real.cpp"
           "${PROJECT_SOURCE_DIR}/src/models/common/dspine/dspine_serial_tail.cpp"
