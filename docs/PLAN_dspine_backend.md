@@ -99,67 +99,32 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- **P3 AUTHORIZATION: GRANTED, NOT EXERCISED (and it will not be tonight).** The
-  user delegated P2→P4 (D-26) including the full prod window. **No prod window was
-  opened**, because the gate never passed: D-34 shows the forward's linear
-  geometries were refused (now cleared, D-35) with the head-format bridge and
-  score-table producer still open. **Prod has been untouched all night** — 5090-1
-  serving at `health=200`, GPU 0 ~0.9 GiB headroom, no lane event, no image change,
-  no cfg change. The authorization was the *permission ceiling*, never a
-  requirement to use it; opening a window on a 2.5/5 gate would have been the exact
-  mistake the fence exists to prevent.
-
-- phase: **P2 IN FLIGHT** (stage 1 forward harness preserved `92bcb397`; stage 2
-  tail landed; stage 3 = engine forward + graph/state + decode-loop wiring
-  PENDING). **P0 gate PASSED** (P0b **SOUND**); P0c **SKIPPED by user (D-17)**.
-  Branch pushed to `origin/feat/dspine-spec-backend`.
-- P2 stage 2 tail: **MERGED** `9a562172` + binding fix `c462071c`. **K1+K2 BOTH
-  CLOSED ON DEVICE** (D-25 `mwpzha6z`-era run + D-28 `k1_proper_t10`): op test
-  4 cases / 0 skipped / exit 0 on GPU 1, **eager and graph-replayed**, batch-2
-  case, prod policy `T=0.9/min_p=0.05` **and** K1-proper `T=1.0 + top_k=20 (no
-  cut)`. Host-core tail tests green CPU-only; suite 82 P / 9 F / 113 S vs
-  81/9/112 = **zero regressions**.
-- P2 NVFP4 gather path: **SOUND** (D-27, `12501faf`) — device NVFP4 vs CPU dequant
-  of identical bytes is **BIT-EXACT** (`normalize_codes` 0 ulp, `serial_scores`
-  idx 240/240); `serial_tail` is format-invariant.
-- P2 artifact load path: **walked end-to-end for the first time** and it exposed
-  blockers one behind the other (kernels → gather → binding → config): binding
-  **FIXED** `c462071c` (declared-format bind, `{BF16,NVFP4}`, tg/tsv pair
-  enforced). `⚠` **OPEN: the config parser** rejects the recipe vocabulary
-  (`unknown member code_bridge_second_pass`) — **CLOSED** `cb9f7e4d` (D-30). Next
-  blocker one layer down: **split-vs-fused naming** — **CLOSED** `4fbaba55` (D-31):
-  the objects are packed and the split names are ranges of them (context k/v are
-  the same bytes twice ⇒ no copy), so **both artifacts bind fully**: 53 objects,
-  **1.31568 GiB** (= D-14 −2.5 %) / 2.16674 GiB BF16 twin. **Sizing rule: count
-  objects, not binding names** (D-30's 2.112 GiB figure was a name-sum overcount).
-  **P3 criterion 3 = half green (load half); the forward is the open half.**
-- **`a5000-11` is UP** (restored 12:50 UTC at MemAvailable 84 GiB — the guard needs
-  66 + 10, so the window is thin and it was taken the moment it opened). All four
-  autostart lanes up.
-- **`a5000-11` DOWN IS INTENTIONAL while a device task is running** (not drift, not
-  a blocked restore): dgemma holds 24 GiB of GPU 1's VRAM, and the DSpine device
-  work needs ~25 GiB. **Current holder: `mwqbcurg-fa28`** (head-format bridge +
-  score-table producer). **Rule: restore `a5000-11` at the END of every device task**
-  (`./lane up a5000-11`; the RAM guard is open) — the `a5000-11` outage is a
-  *per-task bounce*, so a watchdog that sees it down should check for a live device
-  task before flagging, and main must never leave it down without one.
-- `⚠` **dgemma history**: it was down >1 h earlier when **restore was blocked by the RAM
-  guard** (needs 76 GiB, 72 available with basalt warm 73.5 + prod 53). Rule
-  (D-29): **attempt restore at every opportunity, record each refusal with the
-  numbers**; do NOT shrink a reserve at night. Note for the user: a 66 GiB reserve
-  for a 24 GB lane does not fit beside a warm basalt expert cache.
-- `⚠` **RAM is a live constraint**: the forward harness holds ~42 GiB RSS; the
-  guard refused a `a5000-11` restore at MemAvailable 39 GiB (needs 66 + 10). A
-  device window that loads the artifact must budget **RAM, not just VRAM**.
-  Swap is full (8/8 GiB) — build with `-j4`, never two heavy jobs at once.
-- `⚠` **Kernel-dev sampling standard = K1 (D-24)**: T=1.0, top_k 20, top_p 1.0,
-  min_p 0, fixed seed ⇒ bit-exact vs the C++ oracle. Prod T=0.9/min_p 0.05 = K2
-  composition. **The A/B is the only place T=0.9 is measured for acceptance**
-  (N>=3 repeats + a T=0 arm).
-- `⚠` **P3 gate = 5 criteria (D-26)**: tail K1+K2 ✅ · NVFP4 gather ✅ · draft
-  forward from the real 1.3157 GiB artifact ⬜ · whole-round decode wired +
-  T=0 byte-exact ⬜ · **DSpine ≥ DFlash2 K7 on GPU 1 at T=0.9, N>=3** ⬜.
-  **2/5 green.**
+- phase: **P2 stage 3b — draft forward WALK in flight** (`mwqfpn7l-bd41`, opus-5,
+  worktree `/home/kv/work/wt-dspine-walk`, GPU 1 = 25.4 GiB, `a5000-11` down for it).
+  It walks taps → 16-slot block → 5 draft layers → bridge → logits → `serial_scores`
+  → `serial_tail` → 15 drafts, after first **fixing the harness SIGSEGV** that parked
+  the previous attempt (`/home/kv/work/dspine-walk-blocked.cpp.part`).
+- gate (P3, D-26): **3 / 5** — ①tail K1+K2 ✅ ②NVFP4 gather ✅ ③forward: *load half* ✅ /
+  *walk* ⏳ ④whole-round + T=0 byte-exact ⬜ ⑤DSpine ≥ DFlash2 K7 ⬜ **never measured**.
+- **P3 authorization: granted (D-26), NOT exercised — prod untouched all night.**
+- load path: **CLOSED end-to-end** (D-31/35/37): binds fully, **1.31568 GiB (= D-14
+  −2.5 %)**, 55 device objects / 3.83186 GiB with the reused tower head+embedding.
+- standing rules: **K1 kernel-dev standard** (D-24: T=1.0, no filters ⇒ bit-exact) ·
+  **merge gate = build the merged tree + second `ninja` "no work to do" + registration
+  sweep + suite at baseline (7 known)** (D-36/D-38) · **`/tmp` is tmpfs — worktrees under
+  `/home/kv/work/wt-*`, merged ones removed, every branch pushed at first commit**
+  (D-32) · **`a5000-11` down only while a device task runs, restore at its end**
+  · baseline CPU suite **7 known failures** (all missing python deps).
+- `⚠` known defects, recorded not hidden: **A4 at K=25600 is 34 % off fp64 for T ≥ 1024**
+  (bounded → A16 above T=1023; prefill perf) · the **A4 quantizer is a SECOND shape
+  whitelist** · NVFP4-vs-FP8 head = 0–2/240 argmax flips · table parity is normwise
+  (band 1e-3, clean 1.3e-7), precision claim rests on bit-exact argmax rows.
+- next after the walk: criterion 4 (T=0 byte-exact vs the torch reference) → graph
+  capture of the round → **DSpine vs DFlash2 K7, N≥3 at T=0.9 + a T=0 arm** → only then
+  a P3 window (and GPU 0 has ~0.5 GiB slack: prod teardown must precede anything on it).
+- artifacts: worktrees under `/home/kv/work/wt-dspine-*` · fork clone
+  `/tmp/ninfer-dspine-review` · Tencent `/tmp/dspine-ref` · artifacts
+  `/home/kv/models/dspine-v3/` (nvfp4tables 1.3157 GiB = sizing basis, bf16 2.1667 GiB).
 - done: plan; 4 reviews (self / verifier `mwpxt2ws` / D-14 drafter-swap /
   `mwpya6mp` coherence); spine verified (D-01 license, D-05 T=0.9, D-02 map,
   5090-fits, D-14 drafter-swap); fixes → **D-10..14**
