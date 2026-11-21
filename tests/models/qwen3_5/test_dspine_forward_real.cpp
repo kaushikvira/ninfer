@@ -61,6 +61,7 @@
 #include "ninfer/ops/linear_swiglu.h"
 #include "ninfer/ops/linear_topk.h"
 #include "ninfer/ops/projection_weights.h"
+#include "ninfer/ops/residual_add.h"
 #include "ninfer/ops/rmsnorm.h"
 #include "ninfer/ops/rope.h"
 #include "ninfer/ops/sequence.h"
@@ -477,6 +478,14 @@ void report_shapes(Probe& probe) {
 // an earlier stage of the same process reached.
 std::size_t gate_base = 0;
 
+// The last bridge's input residual: prepare_read and finish read and write the residual stream,
+// so the reference needs the state the chain started from. Captured only for the reference arm.
+Tensor* bridge_snapshot = nullptr;
+
+// The code projection's output before normalize_codes overwrites it in place: the reference's
+// normalize_codes input.
+Tensor* codes_snapshot = nullptr;
+
 void require(const bool condition, const char* message) {
     ++counters.checks;
     if (!condition) {
@@ -541,7 +550,8 @@ struct Work {
     Tensor ids, positions, context_positions, context_lengths, context_counts, lengths, valid,
         table_rows, anchors, taps, projected, context, hidden, residual, normalized, rms, codes,
         packed, message, delta, normed, stash, intermediate, query, key, value, attended,
-        context_key, context_value, proposal;
+        context_key, context_value, proposal, scratch_query, query_raw, key_raw,
+        context_key_raw, codes_out;
     Tensor candidates, scores, table, tail_cand, drafts, proposal_q, index, idx_scores,
         positions_rng, configs;
     std::vector<std::unique_ptr<tool::PackedKVFixture>> caches;
@@ -567,53 +577,76 @@ struct Work {
     const auto r    = dimension(probe.config.bridge.rank);
     const auto inter = dimension(probe.config.intermediate_size);
     const auto head  = dimension(probe.target.vocabulary);
+    const auto q    = dimension(probe.config.query_width());
+    const auto k    = dimension(probe.config.key_width());
     const auto policy = ops::LinearPolicy::A16Only;
+    const auto split_bytes = [&] {
+        return ops::linear_split_workspace_capacity_bytes(
+            ops::ProjectionProfile{ops::LinearProfile{
+                probe.declared(probe.weights.layers.front().attention.query).qtype,
+                std::int32_t(probe.packed_rows(probe.weights.layers.front().attention.query)),
+                dimension(probe.config.key_width()), policy, QuantLayout::Contiguous},
+                {}},
+            std::vector<std::int32_t>{q, k, k}, kContext, kContext);
+    };
     const auto at = [&](const WeightId id, const std::size_t rows, const std::size_t tokens) {
         const auto bound = probe.declared(id);
         return ops::linear_workspace_capacity_bytes(bound.qtype, std::int32_t(rows), bound.k,
                                                     policy, std::int32_t(tokens),
                                                     std::int32_t(tokens));
     };
-    const auto packed_at = [&](const WeightId id, const std::size_t tokens) {
-        const auto bound = probe.declared(id);
-        const ops::ProjectionProfile profile{
-            ops::LinearProfile{bound.qtype, std::int32_t(probe.packed_rows(id)), bound.k, policy,
-                               QuantLayout::Contiguous},
-            {}};
-        return ops::linear_split_workspace_capacity_bytes(
-            profile,
-            std::vector<std::int32_t>{dimension(probe.config.query_width()),
-                                      dimension(probe.config.key_width()),
-                                      dimension(probe.config.key_width())},
-            std::int32_t(tokens), std::int32_t(tokens));
-    };
     std::size_t bytes = 0;
-    const auto every = [&](const std::size_t one) { bytes = std::max(bytes, one); };
-    every(at(probe.weights.feature_projection, std::size_t(h) * taps, kContext));
-    every(at(probe.weights.layers.front().attention.output, h, kContext));
-    every(at(probe.weights.layers.front().mlp.down, h, kContext));
-    every(at(probe.weights.bridge.gate, r, kContext));
-    every(at(probe.weights.bridge.read_weight, c, kContext));
-    every(at(probe.weights.bridge.feature_write_weights, h, kContext));
-    every(at(probe.weights.layers.front().attention.context_key,
-              std::size_t(probe.config.key_width()), kContext));
-    const auto head_bound = probe.declared(probe.head);
-    every(ops::linear_topk_workspace_capacity_bytes(head_bound.qtype, head, h, kContext - 1,
-                                                    kContext - 1));
-    every(ops::linear_swiglu_workspace_capacity_bytes(head_bound.qtype, inter, h, policy,
-                                                      kContext, kContext) * 0 +
-          ops::linear_swiglu_workspace_capacity_bytes(
-              probe.declared(probe.weights.layers.front().mlp.gate).qtype,
-              std::int32_t(probe.packed_rows(probe.weights.layers.front().mlp.gate)), h, policy,
-              kContext, kContext));
-    const auto attention = ops::context_softmax_attention_workspace_capacity_bytes(
-        ops::AttentionHeadGeometry{dimension(probe.config.head_dim),
-                                   dimension(probe.config.num_attention_heads),
-                                   dimension(probe.config.num_key_value_heads)},
-        ops::ContextAttentionExecutionEnvelope{std::uint32_t(kContext), std::uint32_t(kContext)},
-        kContext, kContext, kBatch);
-    every(attention);
-    (void)packed_at;
+    const auto every = [&](const char* label, const std::function<std::size_t()>& one) {
+        try {
+            bytes = std::max(bytes, one());
+        } catch (const std::exception& error) {
+            std::printf("  GATE  the capacity plan at %s : %s\n", label, error.what());
+            ++counters.gates;
+        }
+    };
+    every("feature projection", [&] {
+        return at(probe.weights.feature_projection, std::size_t(h) * taps, kContext);
+    });
+    every("attention output", [&] {
+        return at(probe.weights.layers.front().attention.output, h, kContext);
+    });
+    every("mlp down", [&] {
+        return at(probe.weights.layers.front().mlp.down, h, kContext);
+    });
+    every("bridge gate", [&] { return at(probe.weights.bridge.gate, r, kContext); });
+    every("bridge read", [&] { return at(probe.weights.bridge.read_weight, c, kContext); });
+    every("bridge write", [&] {
+        return at(probe.weights.bridge.feature_write_weights, h, kContext);
+    });
+    // The context key and value reach the device through the packed parent's split form
+    // (see run_forward), so the split capacity is the one the walk needs.
+    every("context key/value split", [&] { return split_bytes(); });
+    every("gate/up swiglu split", [&] {
+        return ops::linear_swiglu_workspace_capacity_bytes(
+            probe.declared(probe.weights.layers.front().mlp.gate).qtype,
+            std::int32_t(probe.packed_rows(probe.weights.layers.front().mlp.gate)), h, policy,
+            kContext, kContext);
+    });
+    every("block q/k/v split", [&] { return split_bytes(); });
+    every("proposal head topk", [&] {
+        const auto bound = probe.declared(probe.head);
+        return ops::linear_topk_workspace_capacity_bytes(bound.qtype, head, h, kContext - 1,
+                                                         kContext - 1);
+    });
+    every("mlp down add", [&] {
+        return ops::linear_add_workspace_capacity_bytes(
+            probe.declared(probe.weights.layers.front().mlp.down).qtype, h,
+            dimension(probe.config.intermediate_size), policy, kContext, kContext);
+    });
+    every("context attention", [&] {
+        return ops::context_softmax_attention_workspace_capacity_bytes(
+            ops::AttentionHeadGeometry{dimension(probe.config.head_dim),
+                                       dimension(probe.config.num_attention_heads),
+                                       dimension(probe.config.num_key_value_heads)},
+            ops::ContextAttentionExecutionEnvelope{std::uint32_t(kContext),
+                                                  std::uint32_t(kContext)},
+            kContext, kContext, kBatch);
+    });
     return bytes + (16 << 20);
 }
 
@@ -672,6 +705,11 @@ struct Work {
     out.value             = stream(std::int64_t(k) * w * b, {d, k / d, w, b});
     out.attended          = stream(std::int64_t(q) * w * b, {d, q / d, w, b});
     out.context_key       = stream(std::int64_t(k) * ctx * b, {d, k / d, ctx, b});
+    out.scratch_query     = stream(std::int64_t(q) * ctx * b, {q, ctx, b, 1});
+    out.query_raw         = stream(std::int64_t(q) * w * b, {d, q / d, w, b});
+    out.key_raw           = stream(std::int64_t(k) * w * b, {d, k / d, w, b});
+    out.context_key_raw   = stream(std::int64_t(k) * ctx * b, {d, k / d, ctx, b});
+    out.codes_out         = stream(std::int64_t(c) * w * b, {c, w, b, 1});
     out.context_value     = stream(std::int64_t(k) * ctx * b, {d, k / d, ctx, b});
     out.candidates        = integers(std::int64_t(kSlots) * slots * b, {kSlots, slots, b, 1});
     out.scores            = reals(std::int64_t(kSlots) * slots * b, {kSlots, slots, b, 1});
@@ -735,6 +773,11 @@ void run_bridge(Probe& probe, Work& work, MemoryArena& arena, const std::size_t 
     auto flat_normalized = work.normalized.view({h, columns, 1, 1});
     auto flat_rms = work.rms.view({columns, 1, 1, 1});
     auto flat_codes = work.codes.view({c, columns, 1, 1});
+    if (last && bridge_snapshot != nullptr) {
+        cuda_ok(cudaMemcpy(bridge_snapshot->data, flat_residual.data, flat_residual.bytes(),
+                            cudaMemcpyDeviceToDevice),
+                "snapshot the chain's input residual");
+    }
     step("bridge read: rms of the layer stream" + suffix, [&] {
         ops::dspine_prepare_read(flat_residual, probe.config.bridge.eps, flat_normalized,
                                   flat_rms, cuda.stream());
@@ -744,11 +787,21 @@ void run_bridge(Probe& probe, Work& work, MemoryArena& arena, const std::size_t 
             last ? probe.weight(bridge.read_weight)
                  : probe.stacked(bridge.early_read_weights, layer, std::uint64_t(c),
                                  std::uint64_t(h));
-        ops::linear(flat_normalized, read, flat_codes, ops::LinearPolicy::A16Only, arena, cuda);
+        auto codes_in  = work.codes.view({c, columns, 1, 1});
+        auto codes_out = work.codes_out.view({c, columns, 1, 1});
+        ops::linear(flat_normalized, read, codes_out, ops::LinearPolicy::A16Only, arena, cuda);
+        codes_in = codes_out;
     });
+    if (last && codes_snapshot != nullptr) {
+        cuda_ok(cudaMemcpy(codes_snapshot->data, work.codes_out.data, work.codes_out.bytes(),
+                            cudaMemcpyDeviceToDevice),
+                "snapshot the code projection's output");
+    }
     step("bridge normalize_codes over the real codebook" + suffix, [&] {
-        ops::dspine_normalize_codes(flat_codes, work.anchors, probe.weight(bridge.codebook), w,
-                                    probe.config.bridge.eps, flat_codes, cuda.stream());
+        auto codes_pre = work.codes_out.view({c, columns, 1, 1});
+        auto codes_post = work.codes.view({c, columns, 1, 1});
+        ops::dspine_normalize_codes(codes_pre, work.anchors, probe.weight(bridge.codebook), w,
+                                    probe.config.bridge.eps, codes_post, cuda.stream());
     });
     step("bridge gate, predecessor and value projections into the packed block" + suffix, [&] {
         const auto base = static_cast<std::byte*>(work.packed.data);
@@ -792,7 +845,7 @@ void seed_tail_inputs(Work& work) {
     std::vector<std::int32_t> to(std::size_t(std::int64_t(kBatch) * slots * kSlots));
     for (std::int32_t slot = 0; slot < slots; ++slot) {
         for (std::int32_t cand = 0; cand < kSlots; ++cand) {
-            to[std::size_t(std::int64_t(cand) * kBatch * slots + std::int64_t(slot) * kBatch)] =
+            to[std::size_t(std::int64_t(cand) * kBatch + std::int64_t(slot) * kBatch * kSlots)] =
                 from[std::size_t(cand + std::int64_t(slot) * kSlots)];
         }
     }
@@ -888,14 +941,24 @@ void run_forward(Probe& probe, Work& work, MemoryArena& arena) {
                  std::to_string(layer) + "'s pages",
              [&] {
                  const auto flat = std::int32_t(ctx * b);
-                 auto context  = work.context.view({h, flat, 1, 1});
-                 auto key_out  = work.context_key.view({k, flat, 1, 1});
+                 auto context   = work.context.view({h, flat, 1, 1});
+                 auto key_out   = work.context_key_raw.view({k, flat, 1, 1});
                  auto value_out = work.context_value.view({k, flat, 1, 1});
-                 ops::linear(context, probe.weight(block.attention.context_key), key_out,
-                             ops::LinearPolicy::A16Only, arena, cuda);
-                 ops::linear(context, probe.weight(block.attention.context_value), value_out,
-                             ops::LinearPolicy::A16Only, arena, cuda);
-                 ops::rmsnorm(work.context_key, probe.parameter(block.attention.key_norm),
+                 // The context key and value are the K and V RANGES of the layer's packed
+                 // Q/K/V object, and this engine has no NVFP4 linear compiled at their
+                 // apart geometry (1024 x 5120), nor at the paired one the DFlash path uses
+                 // (2048 x 5120, linear_pair). The split family, which the drafter's own
+                 // packed parent reaches (D-35), is the one compiled route to those bytes:
+                 // the projection is issued over the parent and the Q rows it also computes
+                 // are dropped. At a 16-wide context that is 4096 of 6144 output rows thrown
+                 // away - a measured cost of the missing context geometry, recorded, not
+                 // hidden behind a new kernel.
+                 auto query_out = work.scratch_query.view({q, flat, 1, 1});
+                 const std::array split{
+                     std::move(query_out), std::move(key_out), std::move(value_out)};
+                 ops::linear_split(context, probe.packed_parent(block.attention.query), split,
+                                   cuda);
+                 ops::rmsnorm(work.context_key_raw, probe.parameter(block.attention.key_norm),
                               probe.config.rms_norm_eps, false, work.context_key, cuda);
                  ops::rope(work.context_positions.view({flat, 1, 1, 1}),
                            dimension(probe.config.head_dim), probe.config.rope_theta,
@@ -938,16 +1001,16 @@ void run_forward(Probe& probe, Work& work, MemoryArena& arena) {
             });
         }
         step("split query/key/value projection over the packed parent" + suffix, [&] {
-            const std::array outputs{work.query.view({q, columns, 1, 1}),
-                                     work.key.view({k, columns, 1, 1}),
+            const std::array outputs{work.query_raw.view({q, columns, 1, 1}),
+                                     work.key_raw.view({k, columns, 1, 1}),
                                      work.value.view({k, columns, 1, 1})};
             ops::linear_split(work.hidden.view({h, columns, 1, 1}),
                               probe.packed_parent(block.attention.query), outputs, cuda);
         });
         step("query and key head norms, then RoPE" + suffix, [&] {
-            ops::rmsnorm(work.query, probe.parameter(block.attention.query_norm),
+            ops::rmsnorm(work.query_raw, probe.parameter(block.attention.query_norm),
                          probe.config.rms_norm_eps, false, work.query, cuda);
-            ops::rmsnorm(work.key, probe.parameter(block.attention.key_norm),
+            ops::rmsnorm(work.key_raw, probe.parameter(block.attention.key_norm),
                          probe.config.rms_norm_eps, false, work.key, cuda);
             ops::rope(work.positions.view({columns, 1, 1, 1}), dimension(probe.config.head_dim),
                       probe.config.rope_theta, work.query, work.key, cuda);
@@ -962,8 +1025,15 @@ void run_forward(Probe& probe, Work& work, MemoryArena& arena) {
         step("attention output projection into the residual" + suffix, [&] {
             auto attended = work.attended.view({q, columns, 1, 1});
             auto residual = work.residual.view({h, columns, 1, 1});
-            ops::linear_add(attended, probe.weight(block.attention.output), residual,
-                            ops::LinearPolicy::A16Only, arena, cuda);
+            auto projected = work.projected.view({h, columns, 1, 1});
+            // The attention output projection is [5120, 4096] (D-35 instantiated it for the
+            // plain linear family), and this engine's linear_add carries its own shape table,
+            // which has not that geometry - so the add is taken as its own op. Same math as the
+            // DFlash2 path's project_add, one launch apart, and the geometry gap is reported
+            // here rather than behind a new kernel.
+            ops::linear(attended, probe.weight(block.attention.output), projected,
+                        ops::LinearPolicy::A16Only, arena, cuda);
+            ops::residual_add(projected, residual, cuda);
         });
         step("post-attention norm" + suffix, [&] {
             auto residual = work.residual.view({h, columns, 1, 1});
@@ -993,10 +1063,13 @@ void run_forward(Probe& probe, Work& work, MemoryArena& arena) {
     // the anchor, which is not a proposal. The head is the tower's own; the tail reads the last
     // write's stash - the pre-refinement residual, its rms, and the message as the packed Q.
     step("gather the 15 proposal columns out of the 16-wide block", [&] {
-        cuda_ok(cudaMemcpy2DAsync(work.proposal.data, std::size_t(std::int64_t(h) * slots) * 2,
-                                  static_cast<std::byte*>(work.normed.data) + std::size_t(h) * 2,
-                                  std::size_t(std::int64_t(h) * columns) * 2,
-                                  std::size_t(std::int64_t(h) * slots) * 2, std::int64_t(slots * b),
+        // [H, width, batch] column-major: one batch row of the proposal is the H*(width-1)
+        // elements behind the anchor, so the copy is (width-1)*H wide, batch tall - the same
+        // 2-D form the DFlash2 proposal gather uses.
+        const auto row  = std::size_t(std::int64_t(h) * slots) * 2;
+        const auto src  = static_cast<std::byte*>(work.normed.data) + std::size_t(h) * 2;
+        const auto spitch = std::size_t(std::int64_t(h) * columns) * 2;
+        cuda_ok(cudaMemcpy2DAsync(work.proposal.data, row, src, spitch, row, std::int64_t(b),
                                   cudaMemcpyDeviceToDevice, cuda.stream()),
                 "gather the proposal columns");
     });
@@ -1062,6 +1135,42 @@ std::vector<std::int32_t> run_tail_case(Probe& probe, Work& work, const std::str
     std::fflush(stdout);
     return drafts;
 }
+
+// --- the reference dump ----------------------------------------------------------------------
+//
+// The torch reference (/tmp/dspine-ref/sglang_dspine/models/dspine.py, CPU torch) recomputes the
+// bridge chain from the chain's own inputs. To make the comparison non-circular it has to be fed
+// the same bytes, so the probe writes them out: the chain's inputs, its outputs, and the
+// synthetic-free values the reference needs (the norms, the gate bias, the rms vector). The
+// quantized tables the chain indexes (the codebook rows, tg, tsv, the head rows) are NOT dumped:
+// a dump of them is the device's own dequantization, and comparing that against the device is
+// the vacuity the reference exists to exclude. The parity of those gather paths is P0b's and
+// D-37's, and it is reported as inherited, not re-measured.
+struct Dumper {
+    std::FILE* file = nullptr;
+
+    void put(const char* name, const Tensor& stream, const char* dtype) const {
+        const auto elements = stream.numel();
+        const auto width    = std::string(dtype) == "f4" ? 4u
+                              : std::string(dtype) == "i4" ? 4u
+                                                           : 2u;
+        std::vector<std::byte> bytes(std::size_t(elements) * width);
+        download(bytes.data(), stream.data, bytes.size(), name);
+        std::fprintf(file, "%s %s %lld\n", name, dtype,
+                     static_cast<long long>(elements));
+        std::fwrite(bytes.data(), 1, bytes.size(), file);
+    }
+
+    void put_value(const char* name, const double value) const {
+        std::fprintf(file, "%s f8 1\n", name);
+        std::fwrite(&value, sizeof(double), 1, file);
+    }
+
+    void put_i32(const char* name, const std::vector<std::int32_t>& values) const {
+        std::fprintf(file, "%s i4 %lld\n", name, static_cast<long long>(values.size()));
+        std::fwrite(values.data(), sizeof(std::int32_t), values.size(), file);
+    }
+};
 
 // The permuted-taps arm of the teeth test: the same synthetic tap field with its target-layer
 // axis rotated by one, i.e. every context position is handed the concatenated feature vector of
@@ -1169,11 +1278,36 @@ int main(const int argc, char** argv) {
         }
         if (wanted("forward")) {
             if (probe.backing == nullptr) { probe.materialize(); }
-            const auto bytes = walk_workspace_bytes(probe);
+            std::size_t bytes = 0;
+            try {
+                bytes = walk_workspace_bytes(probe);
+            } catch (const std::exception& error) {
+                // A geometry the linear family has not compiled is the walk's own first gate;
+                // report it the way the walk reports a gate and size the arena from the walk's
+                // own floor, so the probe still says how far the walk gets.
+                std::printf("  GATE  the walk's capacity plan : %s\n", error.what());
+                ++counters.gates;
+                bytes = 768u << 20;
+            }
             auto arena_storage = DeviceBuffer(probe.device, bytes);
             MemoryArena arena(arena_storage.span());
             auto work = allocate(probe, bytes);
-            const auto complete = [&] { return counters.gates == 0; };
+            auto codes_stream = probe.buffer(
+                std::size_t(std::int64_t(dimension(probe.config.bridge.code_size)) *
+                            dimension(probe.config.block_size) * kBatch) * 2,
+                DType::BF16, {dimension(probe.config.bridge.code_size),
+                              dimension(probe.config.block_size), kBatch, 1});
+            auto snapshot = probe.buffer(
+                std::size_t(std::int64_t(dimension(probe.target.hidden_size)) *
+                                  dimension(probe.config.block_size) * kBatch) * 2,
+                DType::BF16, {dimension(probe.target.hidden_size),
+                              dimension(probe.config.block_size), kBatch, 1});
+            bridge_snapshot = &snapshot;
+            codes_snapshot  = &codes_stream;
+            // The arms judge the walk's OWN gates: a capacity-plan gate above is a geometry
+            // report, not a failure of the arms below.
+            const auto gate_floor = counters.gates;
+            const auto complete   = [&] { return counters.gates == gate_floor; };
 
             std::printf("the proposal path, on the real weights:\n");
             std::uint64_t free_before = 0, total = 0;
@@ -1192,9 +1326,71 @@ int main(const int argc, char** argv) {
                 // Determinism: the same inputs, walked again, must publish the same bytes.
                 std::printf("determinism: the same inputs, walked again\n");
                 auto second = walk_and_draft(probe, work, arena, false);
-                require(second.complete && second.sampled == first.sampled &&
-                            second.greedy == first.greedy,
-                        "the walk is not deterministic on the device");
+                require(second.complete, "the second walk did not complete");
+                require(second.sampled == first.sampled,
+                        "the sampled arm is not deterministic on the device");
+                require(second.greedy == first.greedy,
+                        "the T=0 arm is not deterministic on the device");
+
+                if (const auto path = setting("NINFER_TEST_DUMP"); !path.empty()) {
+                    std::printf("reference dump: %s\n", path.c_str());
+                    Dumper dumper{std::fopen(path.c_str(), "wb")};
+                    if (dumper.file == nullptr) {
+                        throw std::runtime_error("the reference dump cannot be opened");
+                    }
+                    const auto h2 = dimension(probe.target.hidden_size);
+                    const auto w2 = dimension(probe.config.block_size);
+                    const auto columns2 = std::int32_t(w2 * kBatch);
+                    dumper.put("residual_pre", *bridge_snapshot, "u2");
+                    dumper.put("normalized", work.normalized, "u2");
+                    dumper.put("rms", work.rms, "f4");
+                    dumper.put("codes_pre", *codes_snapshot, "u2");
+                    dumper.put("codes", work.codes, "u2");
+                    dumper.put("packed", work.packed, "u2");
+                    dumper.put("message", work.message, "u2");
+                    dumper.put("delta", work.delta, "u2");
+                    dumper.put("raw", work.stash, "u2");
+                    dumper.put("normed", work.normed, "u2");
+                    dumper.put("residual_post", work.residual, "u2");
+                    // The norm vectors are weights, not probe buffers: copy them into probe
+                    // storage so the readback goes through the same device boundary.
+                    auto host_copy = [&](const Tensor& source) {
+                        auto slot = probe.buffer(source.bytes(), source.dtype == DType::BF16
+                                                      ? DType::BF16
+                                                      : source.dtype,
+                                                  {source.ne[0], source.ne[1], source.ne[2],
+                                                   source.ne[3]});
+                        cuda_ok(cudaMemcpy(slot.data, source.data, source.bytes(),
+                                            cudaMemcpyDeviceToDevice),
+                                "copy a weight vector into the probe's own storage");
+                        return slot;
+                    };
+                    dumper.put("final_norm",
+                               host_copy(probe.parameter(probe.weights.final_norm)), "u2");
+                    dumper.put("gate_bias",
+                               host_copy(probe.parameter(probe.weights.bridge.gate_bias)), "u2");
+                    dumper.put("table", work.table, "f4");
+                    dumper.put("tail_cand", work.tail_cand, "i4");
+                    dumper.put("anchors", work.anchors, "i4");
+                    dumper.put("idx", work.idx_scores, "i4");
+                    dumper.put_i32("drafts_sampled", first.sampled);
+                    dumper.put_i32("drafts_greedy", first.greedy);
+                    dumper.put_i32("shape", {h2,
+                                             w2,
+                                             kBatch,
+                                             columns2,
+                                             dimension(probe.config.bridge.code_size),
+                                             dimension(probe.config.bridge.rank),
+                                             dimension(probe.config.target_layer_ids.size()),
+                                             dimension(probe.config.head_dim),
+                                             dimension(probe.config.num_attention_heads),
+                                             dimension(probe.config.num_key_value_heads)});
+                    dumper.put_value("bridge_eps",
+                                     double(probe.config.bridge.eps));
+                    dumper.put_value("rms_norm_eps",
+                                     double(probe.config.rms_norm_eps));
+                    std::fclose(dumper.file);
+                }
 
                 // Teeth: rotate the target-layer axis of the taps (a wrong tap index) and the
                 // drafts must move. A walk that ignores the taps, or a comparison that cannot
@@ -1223,8 +1419,16 @@ int main(const int argc, char** argv) {
                                                   probe.cuda().stream());
                          cuda_ok(cudaGetLastError(), "serial chain launch");
                      });
-                if (counters.gates == 0) {
-                    require(download_i32(greedy) == first.greedy,
+                if (complete()) {
+                    const auto pair = download_i32(greedy);
+                    const auto show = [](const char* label, const std::vector<std::int32_t>& v) {
+                        std::printf("        %s =", label);
+                        for (const auto one : v) { std::printf(" %d", one); }
+                        std::printf("\n");
+                    };
+                    show("serial_chain (serial_scores' idx)", pair);
+                    show("serial_tail at T=0            ", first.greedy);
+                    require(pair == first.greedy,
                             "the T=0 tail did not equal the greedy pair over the same idx");
                 }
             }
