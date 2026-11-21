@@ -143,6 +143,14 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
+- **Watchdog re-armed (hourly)**: scheduled read-only verifier `d39472b7-4289`, cron `:07`
+  every hour, 14 runs. It reads STATUS + ledger + git (incl. **unpushed**), `lane status`
+  (basalt never down; prod must serve; **`a5000-11` down by user decision — not drift**),
+  running tasks, and — the new check — **worktree staleness** (`>15` uncommitted files, or
+  newest-file mtime `>20 min` with **no build running** = probable stalled agent), plus
+  **tmpfs RAM sinks** (`/tmp` is RAM here) and `MemAvailable`. Report caps at 12 lines and
+  names the next best action if main looks stuck.
+
 - phase: **P2 — RESET DONE, ACCEPTANCE PROVEN UNMEASURABLE IN THE PROBE (D-42)**.
   `0201b102`: round reset ⇒ a round is a pure function of its inputs (`0 of 37 byte
   streams part` over 32 rounds, alloc-free green). **Acceptance needs the target's
