@@ -780,6 +780,51 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   run reported a phantom red — now labelled, **baseline 8 → 7** (the remaining 7 are
   all missing-python-deps oracle tests: `jinja2` etc.).
 
+- **D-2026-11-21-40** — **D-39's RED 2 IS WIRING, NOT ARITHMETIC: the walk handed
+  `dspine_serial_tail` the *chain's* candidate bytes. The T=0 identity reproduces on the
+  composed walk, bit-exact.** `mwqh6cy5-b72d` follow-up on `e2c2aa42` (`fc7b6f85`,
+  `feat/dspine-t0`). `serial_scores`/`serial_chain` are handed `cand [16, drafts, batch]`
+  (`dspine_bridge.h:107-111`); `serial_tail` is handed `cand [batch, drafts, 16]` and indexes
+  `cand[b + batch*(slot + drafts*choice)]` (`:98-103`). Transposed shapes for one logical
+  table, and the strides differ twice over: the slot and candidate axes swap **and** the
+  candidate axis carries `batch*drafts` (15 at prod) where the head's carries the 16 — so at
+  batch 1 the walk's "host transpose of 240 words" was an **identity copy**. The tail sampled
+  real vocabulary ids out of *other slots'* candidate sets. Measured on GPU 1
+  (`CUDA_VISIBLE_DEVICES=1`, visible ordinal 0, pci `c1:00`), on the walk's own taps:
+  as merged → the tail's candidate stream **238/240 misplaced**, the T=0 arm vs *its own
+  round's* greedy pair **15/15 apart**, **10–13 of 15** published drafts not one of their
+  slot's 16 ids (`serial_tail_accept_q_error`'s contract), while **`argmax(table)` vs the
+  round's own `idx` = 0/240** (the table and its argmax never parted). Fixed → all three rows
+  identical bit-for-bit: **T=0.9 arm = T=0 arm = the round's own greedy pair, 15/15, in every
+  publishing round**; candidate stream 0/240; `argmax(table)` 0/240.
+  **Rule table (no op was touched, none was wrong):** the reference `_chain`
+  (`propose.py:104-112`), the reference `serial_sample_chain` at `inv_temp→∞` (`:114-152` —
+  the argmax chain under `min_p>0`, *and* under `min_p=0` because `top_p=1` keeps the
+  zero-mass slots so the `cdf≤u` count clamps back onto the argmax), `serial_chain_kernel`,
+  and `serial_tail_kernel`'s `temperature<=0` branch all walk
+  `sender = argmax_k table[i, sender, k]`, publish `cand[i, that]`, first max wins ties.
+  **Agree, 4/4.** `⚠` Three more probe defects the red was hiding: (a) the bridge, the layout
+  check and the greedy pair read device streams with a **host copy that is not sequenced
+  against the walk's stream** — round N read round N−1's candidates and round N+1's chain,
+  which is what made the pair look a round *behind* the tail; they settle the stream first now
+  (the form `run_tail_case` already used). (b) the identity compared the **last** round's
+  streams (the teeth round rotates the taps) against the **first** round's drafts. (c) the
+  module-load pass, which publishes nothing, was the pass the alloc-free/determinism
+  properties were measured around — D-39's own rule says they hold from the *second* pass, so
+  one load pass runs first: **the alloc-free row is GREEN (21159→21159 MiB) where it was red.**
+  `⚠` **Criterion 4 (T=0 byte-exact) stays OPEN**: the probe's pass-to-pass **determinism**
+  row is red, and it is *not* an acceptance-path defect — a round's greedy pair moves with its
+  drafts, so the divergence is upstream in the five-layer forward over the synthetic tap
+  field (D-39's "determinism holds from the second pass" did not reproduce). Parity rows
+  unmoved, re-run on device: P0b `serial_scores idx` **240/240 BIT-EXACT** ×3 and
+  `serial_chain drafts` **15/15 BIT-EXACT** ×3; D-37's harness `A-q8-gather` 240/240,
+  `A-table-argmax` 240/240, `D-compose:t00-greedy-pair` **15/15 BIT-EXACT** (clean rows 24,
+  0 unexpected, teeth 4 kinds all bite, 16/16 gate arms refused);
+  `ninfer_dspine_serial_tail_op_test` **4 cases, 0 skipped, exit 0** (D-24's K1+K2 and the
+  `greedy_t0` degenerate), `ninfer_dspine_serial_tail_test` + `ninfer_dspine_shapes_test`
+  exit 0.
+
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
