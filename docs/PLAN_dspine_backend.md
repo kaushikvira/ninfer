@@ -287,6 +287,33 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   uninterpretable. R1 ("T=0.9 accept math = LOW risk") is **re-rated: not
   closed** until the tail op is parity-checked against the CPU oracle on GPU.
 
+- **D-2026-11-21-23** — **DSpine is arch/shape-MATCHED but NOT proven optimized.**
+  Where the match is real: the fork declares itself "tuned for a single RTX 5090
+  (32 GB), `sm_120a`" with CUDA 13.1 — **exactly this box and toolchain** — and
+  P0a compiled native `sm_120a` SASS with zero fallbacks; the shapes we ported
+  (hidden 5120 / rank 512 / code 1024 / block 16) are the fork's own target
+  shapes for the 27B family. So there is **no portability perf tax**. Where it is
+  NOT optimized, all four named and none assumed:
+  (1) **No CUDA-graph capture yet** (P2 stage 3) — a DSpine round is ~8 tiny ops
+  on a 16-wide block; capture is the single biggest host-overhead win and is
+  unmeasured.
+  (2) **batch > 1 unvalidated** — every op carries a `batch` axis, prod serves
+  concurrent clients through nginx; the fork's numbers are single-request.
+  (3) **the T=0.9 path has NO upstream benchmark at all**: the fork's measured
+  table is **T=0** on the **stock** tower, i.e. it exercised only the **greedy**
+  pair (`dspine_serial_scores` + `dspine_serial_chain`). The sampled tail we
+  built in D-22 is **entirely our code, unmeasured and unverified**.
+  (4) **NVFP4-table gather/dequant sits in the serial inner loop** and is
+  unmeasured (D-20). The fork's own table (BF16 2218.7 MiB → NVFP4 1347.3 MiB,
+  −869 MiB, rel_err 0.094–0.095) shows the formats are close in *acceptance*, not
+  in *latency*.
+  `⚠` **Therefore**: the fork's 850/336/200/211 tok/s (T=0, stock tower, Windows,
+  counting/code/list/prose) are **not comparable to prod** and are to be treated
+  as an upper bound, never a plan input. **Perf is a measured deliverable, not an
+  assumption**: P2 stage 3 + the GPU window must produce tok/s + tok/round for
+  DSpine **and** for the DFlash2 K7 control arm on the same corpus, at T=0.9,
+  batched, graph-captured. Until then "optimized" is an open claim.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
