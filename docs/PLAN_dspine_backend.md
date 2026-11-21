@@ -99,11 +99,11 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- phase: **P2 stage 3b — draft forward WALK in flight** (`mwqfpn7l-bd41`, opus-5,
-  worktree `/home/kv/work/wt-dspine-walk`, GPU 1 = 25.4 GiB, `a5000-11` down for it).
-  It walks taps → 16-slot block → 5 draft layers → bridge → logits → `serial_scores`
-  → `serial_tail` → 15 drafts, after first **fixing the harness SIGSEGV** that parked
-  the previous attempt (`/home/kv/work/dspine-walk-blocked.cpp.part`).
+- phase: **P2 — walk DONE (`e2c2aa42`), T=0 divergence OPEN** (`mwqh6cy5-b72d`, opus-5,
+  worktree `/home/kv/work/wt-dspine-t0`, GPU 1 = 25.4 GiB, `a5000-11` down for it).
+  The walk publishes **15 real drafts** at T=0.9 and T=0; **but `serial_chain` over the
+  walk's own `idx` ≠ the T=0 tail arm** (D-39, red 2) ⇒ criterion 4 is blocked on
+  deciding which rule is right per `propose.py:73-152`.
 - gate (P3, D-26): **3 / 5** — ①tail K1+K2 ✅ ②NVFP4 gather ✅ ③forward: *load half* ✅ /
   *walk* ⏳ ④whole-round + T=0 byte-exact ⬜ ⑤DSpine ≥ DFlash2 K7 ⬜ **never measured**.
 - **P3 authorization: granted (D-26), NOT exercised — prod untouched all night.**
@@ -779,6 +779,35 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   `expert_cache` test carried no `gpu` label and no CPU-only path, so every CPU-only
   run reported a phantom red — now labelled, **baseline 8 → 7** (the remaining 7 are
   all missing-python-deps oracle tests: `jinja2` etc.).
+
+- **D-2026-11-21-39** — **THE WALK RUNS; A CORRECTNESS DIVERGENCE IN THE ACCEPTANCE PATH
+  IS THE NEW HEADLINE.** Merged `e2c2aa42` (from `9cc423df`/`526449c7`): the draft
+  forward **walks end-to-end on device** — 90 steps, 0 walk gates, 55 objects /
+  3.83186 GiB, publishing **15 real drafts at T=0.9 and at T=0**, over
+  block arrangement → tower embedding → feature projection → context norm → **5×
+  {context KV pages, split QKV, q/k norms+RoPE, paged context attention, attn-out,
+  SwiGLU, down, 7-step code bridge}** → `linear_topk` @248077 → `serial_scores` →
+  `serial_tail`. **P3 criterion 3 forward half is met structurally.**
+  `⚠` **RED 2 (the one that matters)**: **`serial_chain` over the walk's own
+  `serial_scores` `idx` ≠ the T=0 `serial_tail` arm** — D-37's "T=0 == greedy pair"
+  identity **does not reproduce on the composed walk** although it holds at op level.
+  That is a divergence **inside the path prod will run**, so it is being chased before
+  anything else (in flight `mwqh6cy5-b72d`): which side is right per
+  `propose.py:73-152`, where the score table / cand ordering / sender-update first
+  differ, and why the op-level test missed it (suspicion: its cases never made the two
+  rules disagree). **Criterion 4 (T=0 byte-exact) stays OPEN until this is resolved.**
+  Other reds, recorded not hidden: (3) the **reference harness is not yet a parity row**
+  — synthetic activations saturate (read-RMS 2.9e4, residual 2.3e6) so per-op BF16
+  rounding diverges ~1.4 rel-Fro; it needs a **captured real-prefill fixture**;
+  (1) the **first walk of a process publishes zero drafts / takes 4 MiB** (first-touch
+  module load) ⇒ determinism + alloc-free hold **from the second pass**, and graph
+  capture needs a **warmup pass** exactly like the engine's own decode graphs.
+  `⚠` **Accepted cost, stated**: three routes the NVFP4 tables have no name for are
+  taken over the drafter's **packed parent** (`linear_split` over `[6144,5120]`) ⇒ at a
+  16-wide context it computes **4096 of 6144 output rows and drops them**; the
+  attention output uses `linear` + `residual_add` because **`linear_add` carries a
+  second shape table** (D-35's lesson a third time). Gateable later by a K/V-only
+  instantiation; not a correctness issue.
 
 ## OBJECTIVE
 
