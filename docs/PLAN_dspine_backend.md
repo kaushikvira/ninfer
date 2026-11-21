@@ -556,9 +556,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **names**, reading each packed object **seven times**; the sizing number is the
   **per-object** one. **Sizing rule from now on: count objects, not binding names**
   (verify with `dspine_inventory`/the per-object probe, not the name sum).
-  Merged `4fbaba55`. **P3 gate criterion 3 = load half green** (bind + footprint from
-  the real 1.3157 GiB artifact); **the forward is the open half, in flight
-  `mwq6hti0-4872`** (dgemma down, GPU 1 25.5 GiB, torch reference, worktree on disk).
+  Merged `4fbaba55`. **P3 criterion 3 = load half MEASURED ON DEVICE** (55 objects,
+  **3.83186 GiB** incl. the reused tower head+embedding, 0.29 s h2d, zero-copy) —
+  **the forward half is BLOCKED on nvfp4 linear geometry** (D-34): feature
+  projection `[5120,25600]`, split q/k/v `[6144,5120]`, attention out `[5120,4096]`
+  are refused at a **host-side shape lookup before any launch**. Instantiation in
+  flight `mwq9e7xr-8932`. **`⚠` P3 is NOT reachable tonight** (D-34).
 
 - **D-2026-11-21-32** — `⚠` **`/tmp` IS tmpfs ON TURIN (RAM-backed) — worktrees and
   build dirs there were eating the fleet's RAM floor.** The watchdog caught "the
@@ -591,6 +594,43 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   Tencent's **torch** `sglang_dspine/models/dspine.py` (CPU torch at
   `/home/kv/venvs/qquant/bin/python`), worktree on **disk** `/home/kv/work/wt-dspine-fwd`
   (D-32).
+
+- **D-2026-11-21-34** — `⚠` **THE FORWARD IS BLOCKED ON KERNEL GEOMETRY, NOT ON WIRING —
+  P3 IS OFF THE TABLE TONIGHT.** `59830140` (merged `c7d09a66`) measured the
+  **load** clean: **55 device objects = 3.83186 GiB** = 53 drafter (**1.31568 GiB,
+  = D-20 exactly**) + the tower's `output_head` and `token_embedding`
+  (`q8_g32_fp16 [248320,5120]`, 1.259 GiB each — the drafter **reuses** them),
+  zero-copy binding, no fused copies, 0.29 s h2d, 25 GiB target payload never
+  requested. Then a **host-side shape lookup refused every draft-layer projection
+  before any launch** — the forward's **first op** cannot issue:
+  | op | geometry | rep | verdict |
+  |---|---|---|---|
+  | feature projection (the taps) | `[5120,25600]` | nvfp4 | **unsupported shape** |
+  | attention q/k/v packed | `[6144,5120]` | nvfp4 | **unsupported split parent** |
+  | attention output | `[5120,4096]` | nvfp4 | **unsupported shape** |
+  | mlp gate/up · down | `[34816,5120]` · `[5120,17408]` | nvfp4 | compiled |
+  | bridge read/gate/write · proposal head | bf16 · `[248320,5120]` | q8_g32_fp16 | compiled |
+  **The fork's tables explain it**: it instantiated these geometries in **Q8**
+  (`q8/shapes/n5120_k25600.cu`, `n6144_k5120.cu`, `n5120_k6144.cu`) and **not** in
+  nvfp4 (its nvfp4 dir = the 27B/DFlash2 set only) ⇒ **the fork ran the DSpine draft
+  layers in Q8 while our artifact declares NVFP4.** Neither tree has `5120×4096`
+  (prod reaches that geometry through `linear_dynamic_grouped_conv_add` conv
+  fusion; DSpine has no convs) ⇒ **no precedent — must be established.**
+  `⚠` **Three further gaps, all real, all downstream of the shapes**: (i) **no
+  in-engine producer for the tail's score table** (`[batch,16,16,drafts]` FP32) —
+  `dspine_serial_scores` emits only `idx` ⇒ **the T=0.9 arm is blocked twice
+  over**; (ii) `serial_scores` requires **`FP8_E4M3FN_ROW_BF16`** while our tower
+  head is **`q8_g32_fp16`** ⇒ a head-format bridge is needed; (iii) a **harness
+  SIGSEGV** (`cuMemcpyHtoD` into a valid `type=2 device=0` destination, only with
+  `DeviceContext` + 3.8 GiB live) parked the written forward walk at
+  `/home/kv/work/dspine-walk-blocked.cpp.part` — the agent refused to ship code that
+  segfaults as if it measured something, **correct call**.
+  **Decision**: instantiate the three **NVFP4** geometries (numerics-preserving,
+  keeps the D-20 artifact) rather than re-quantize; Q8 fallback costed but **not**
+  implemented without sign-off. In flight `mwq9e7xr-8932`.
+  **`⚠` CONSEQUENCE — no P3 window tonight.** Gate = **2.5/5**, and criteria 3–5 all
+  sit behind these gaps. What survives is real: load path closed, tail policy
+  parity closed on device, NVFP4 gather closed.
 
 ## OBJECTIVE
 
