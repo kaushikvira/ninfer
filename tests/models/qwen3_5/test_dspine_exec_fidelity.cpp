@@ -576,8 +576,17 @@ namespace {
                        rows * columns);
 }
 
-[[nodiscard]] Weight as_weight(const BoundWeight& bound) {
-    return native_weight(bound.view, 1.0F);
+// The identity input scale, 1.0F, is what the reference probe names for a gathered table
+// (test_dspine_forward_real.cpp:252). The scale is NOT always 1: `ops::prepare_linear_weight`
+// gives a weight an input scale only for the formats that carry their activations in a scale
+// domain (src/ops/weight_input.cpp:83-106 - NVFP4 gets the use's calibration, or 1, and every
+// other format is left at 0). The tower's Q8_G32_FP16 head is such a format, so the executor's
+// prepared head carries 0 and this probe's carried 1. The two arms ran to a bit-exact head,
+// candidate, draft and proposal_q stream across all 32 rounds with those two different values,
+// which is the measurement that the field is inert for the head's ops; the binding table names
+// the convention so it closes on the bytes the round really reads.
+[[nodiscard]] Weight as_weight(const BoundWeight& bound, const float scale = 1.0F) {
+    return native_weight(bound.view, scale);
 }
 
 [[nodiscard]] Tensor as_parameter(const BoundWeight& bound) {
@@ -633,9 +642,12 @@ struct SpecArm {
         });
         step("bridge code projection", [&] {
             const auto& read = probe.read[layer];
-            auto codes_in   = round->codes.view({g.c, columns, 1, 1});
             auto codes_out  = round->codes_out.view({g.c, columns, 1, 1});
-            ops::linear(codes_in, read, codes_out, ops::LinearPolicy::A16Only, *arena, cuda);
+            // The forward probe's line, verbatim (test_dspine_forward_real.cpp:802): the input is
+            // the rms'd LAYER stream [hidden, columns]; the read weight [code, hidden] makes the
+            // codes its output.
+            ops::linear(flat_normalized, read, codes_out, ops::LinearPolicy::A16Only, *arena,
+                        cuda);
         });
         step("bridge normalize_codes over the real codebook", [&] {
             auto codes_pre  = round->codes_out.view({g.c, columns, 1, 1});
@@ -867,12 +879,37 @@ namespace {
 // - a stacked slice that took the wrong row range, a packed parent that is not the object the
 // context split needs, or a representation that resolved apart are all visible here, and the two
 // walks then ran on these two pairs.
+// The whole identity an op's gate reads, not only the matrix: the shape pair, the representation,
+// the two planes and their scale domain, and the two scales. A table that shares its code plane
+// and its shape while parting on its `weight_scale` is a different weight to
+// `validate_nvfp4_weight`, and a binding table that printed only (n, k, qtype, layout) called the
+// pair matched. This is the full field set the ops' NVFP4 and Q8 gates name.
 [[nodiscard]] std::string weight_identity(const Weight& weight) {
-    char buffer[160];
-    std::snprintf(buffer, sizeof(buffer), "%p n=%d k=%d qtype=%d layout=%d",
-                  const_cast<void*>(std::bit_cast<void*>(weight.qdata)), weight.n, weight.k,
+    char buffer[400];
+    std::snprintf(buffer,
+                  sizeof(buffer),
+                  "%p n=%d k=%d qtype=%d layout=%d scales=%p qhigh=%p hb=%u payload=%p/%llu "
+                  "ws=%g is=%g g=%u/%u sd=%d nd=%d pad=[%d,%d] sh=[%d,%d]",
+                  const_cast<void*>(std::bit_cast<void*>(weight.qdata)),
+                  weight.n,
+                  weight.k,
                   static_cast<std::int32_t>(weight.qtype),
-                  static_cast<std::int32_t>(weight.layout));
+                  static_cast<std::int32_t>(weight.layout),
+                  const_cast<void*>(weight.scales),
+                  const_cast<void*>(weight.qhigh),
+                  weight.high_plane_bytes,
+                  const_cast<void*>(weight.payload),
+                  static_cast<unsigned long long>(weight.payload_bytes),
+                  weight.weight_scale,
+                  weight.input_scale,
+                  weight.group,
+                  weight.group_size,
+                  static_cast<std::int32_t>(weight.scale_dtype),
+                  weight.ndim,
+                  weight.padded_shape[0],
+                  weight.padded_shape[1],
+                  weight.shape[0],
+                  weight.shape[1]);
     return buffer;
 }
 
@@ -1317,7 +1354,7 @@ int main(const int argc, char** argv) {
         const auto& bound = *shard.dspine;
         SpecWeights spec;
         spec.embedding          = as_weight(model->weight(shard.text.token_embedding));
-        spec.head               = as_weight(model->weight(shard.text.output_head));
+        spec.head               = as_weight(model->weight(shard.text.output_head), 0.0F);
         spec.feature_projection = as_weight(model->weight(bound.feature_projection));
         spec.codebook           = as_weight(model->weight(bound.bridge.codebook));
         spec.gate               = as_weight(model->weight(bound.bridge.gate));
@@ -1335,16 +1372,21 @@ int main(const int argc, char** argv) {
         // `read_weight`. The row range is the slice under test: the executor takes
         // (rows, columns) = (read[0], read[1]) and (write[2], write[1])
         // (execution/parameters.cpp:290-300), which is the probe's `stacked` at the same product.
+        // The two stacked objects in the order their own objects are laid out: layer i's read is
+        // [code, hidden] of the [layers-1, code, hidden] object and its write is [hidden, rank] of
+        // the [layers, hidden, rank] one, which is the forward probe's
+        // `stacked(early_read_weights, layer, c, h)` and
+        // `stacked(feature_write_weights, layer, h, r)` (test_dspine_forward_real.cpp:795,833).
         for (std::size_t layer = 0; layer + 1 < bound.layers.size(); ++layer) {
             spec.read.push_back(stacked(model->weight(bound.bridge.early_read_weights), layer,
                                         read_shape[0], read_shape[1]));
             spec.write.push_back(stacked(model->weight(bound.bridge.feature_write_weights),
-                                         layer, write_shape[2], write_shape[1]));
+                                         layer, write_shape[1], write_shape[2]));
         }
         spec.read.push_back(as_weight(model->weight(bound.bridge.read_weight)));
         for (std::size_t layer = bound.layers.size() - 1; layer < bound.layers.size(); ++layer) {
             spec.write.push_back(stacked(model->weight(bound.bridge.feature_write_weights),
-                                         layer, write_shape[2], write_shape[1]));
+                                         layer, write_shape[1], write_shape[2]));
         }
         for (const auto& layer : bound.layers) {
             SpecLayer row;

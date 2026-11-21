@@ -348,19 +348,27 @@ void dspine_append_context(DspineExecutionView view, const Tensor& features,
     for (std::size_t layer = 0; layer < weights.layers.size(); ++layer) {
         auto layer_scope = view.work.scope();
         const auto& block = weights.layers[layer];
-        auto key_raw = view.work.alloc(DType::BF16, {shape.key, columns});
-        auto value   = view.work.alloc(DType::BF16, {shape.key, columns});
-        auto query_scratch = view.work.alloc(DType::BF16, {shape.query, columns});
-        const std::array streams{query_scratch, key_raw, value};
+        // Head-shaped, as in the walk and as the probe allocates them: the key norm is a
+        // [head_dim] gain over a [head_dim, key_value_heads, width, batch] stream, and RoPE and
+        // the paged append name the same geometry. The split writes the flat rows of the same
+        // bytes through the views below.
+        auto key_raw = view.work.alloc(DType::BF16,
+                                       {shape.head_dim, shape.key_value_heads, width, batch});
+        auto value   = view.work.alloc(DType::BF16,
+                                       {shape.head_dim, shape.key_value_heads, width, batch});
+        auto query_scratch = view.work.alloc(DType::BF16,
+                                             {shape.head_dim, shape.query_heads, width, batch});
+        const std::array streams{query_scratch.view({shape.query, columns}),
+                                  key_raw.view({shape.key, columns}),
+                                  value.view({shape.key, columns})};
         ops::linear_split(context, block.query_key_value.weight, streams, view.cuda);
-        auto key = view.work.alloc(DType::BF16, {shape.key, columns});
+        auto key = view.work.alloc(DType::BF16,
+                                   {shape.head_dim, shape.key_value_heads, width, batch});
         ops::rmsnorm(key_raw, block.key_norm, shape.rms_norm_eps, false, key, view.cuda);
         ops::rope(positions.view({columns}), shape.head_dim, shape.rope_theta, key, view.cuda);
         ops::kv_cache_append_prefix(
-            key.view({shape.head_dim, shape.key_value_heads, width, batch}),
-            value.view({shape.head_dim, shape.key_value_heads, width, batch}),
-            positions, counts, table_rows, envelope, view.context_layer(std::uint32_t(layer)),
-            view.cuda);
+            key, value, positions, counts, table_rows, envelope,
+            view.context_layer(std::uint32_t(layer)), view.cuda);
     }
 }
 
@@ -383,13 +391,18 @@ struct BridgeStreams {
 };
 
 void dspine_bridge(DspineExecutionView view, BridgeStreams& streams, Tensor& residual,
-                   const WalkGeometry& shape, std::size_t layer, bool last) {
+                   const WalkGeometry& shape, std::int32_t columns, std::size_t layer, bool last) {
     const auto& weights = drafter_parameters(view.parameters);
     const auto& bridge  = weights.bridge;
     if (layer >= bridge.read.size() || layer >= bridge.write.size())
         throw std::logic_error("dspine draft: the bridge is missing a layer's read or write");
-    const auto columns = residual.ne[0] * residual.ne[1];
-    auto codes_in   = streams.codes.view({shape.code, columns});
+    // The block's token columns come IN, from the round that owns them. The residual is
+    // [hidden, columns], so `ne[0] * ne[1]` is hidden x columns, not columns: every stream view
+    // below is then `columns` times too wide, and the bridge died at its first view with
+    // "view element count mismatch" - the walk's first stop inside the bridge. The probe takes
+    // the same value from its own round (`columns = w * b`, test_dspine_forward_real.cpp:780).
+    if (columns < 1)
+        throw std::invalid_argument("dspine bridge: the round's column count is not positive");
     auto codes_out  = streams.codes_out.view({shape.code, columns});
     auto codes_post = streams.codes.view({shape.code, columns});
     auto delta      = streams.delta.view({shape.hidden, columns});
@@ -404,8 +417,15 @@ void dspine_bridge(DspineExecutionView view, BridgeStreams& streams, Tensor& res
     // (t = 0) is the codebook's row for the row's anchor token.
     // The per-layer read and write are the Weight forms: one row range of the bridge's stacked
     // object, issued with the drafter's own policy rather than a prepared projection's.
-    ops::linear(codes_in, bridge.read[layer], codes_out, ops::LinearPolicy::A16Only, view.work,
-                view.cuda);
+    // THE CODE PROJECTION'S INPUT IS THE NORMED LAYER STREAM, NOT THE CODES. The read weight is
+    // [code, hidden], so `ops::linear`'s [K,T] x [N,K] contract takes K = hidden: the input is
+    // the `dspine_prepare_read` output [hidden, columns] and the codes are its OUTPUT. Handing
+    // it the codes ([code, columns], K = code) is a shape the op refuses, and the walk has never
+    // run, so the port has carried it unexecuted; the forward probe's step of the same name
+    // passes `flat_normalized` (test_dspine_forward_real.cpp:802) and the fidelity probe caught
+    // the two of them parting here.
+    ops::linear(streams.normalized, bridge.read[layer], codes_out, ops::LinearPolicy::A16Only,
+                view.work, view.cuda);
     ops::dspine_normalize_codes(codes_out, streams.anchors, bridge.codebook, streams.width,
                                 shape.bridge_eps, codes_post, view.cuda.stream());
     // The gate, the predecessor gate and the value projection of the codes, into ONE packed
@@ -483,12 +503,27 @@ void dspine_walk(DspineExecutionView view, const DspineWalkInputs& inputs,
     auto hidden       = view.work.alloc(DType::BF16, {shape.hidden, columns});
     auto projected    = view.work.alloc(DType::BF16, {shape.hidden, columns});
     auto intermediate = view.work.alloc(DType::BF16, {shape.intermediate, columns});
-    auto query_raw    = view.work.alloc(DType::BF16, {shape.query, columns});
-    auto key_raw      = view.work.alloc(DType::BF16, {shape.key, columns});
-    auto value        = view.work.alloc(DType::BF16, {shape.key, columns});
-    auto query        = view.work.alloc(DType::BF16, {shape.query, columns});
-    auto key          = view.work.alloc(DType::BF16, {shape.key, columns});
-    auto attended     = view.work.alloc(DType::BF16, {shape.query, columns});
+    // THE FIVE HEAD STREAMS ARE HEAD-SHAPED, NOT ROW-FLAT. `ops::rmsnorm` reduces ne[0] and the
+    // head norm's weight is [head_dim], so a query_raw of [query_width, columns] asks it to
+    // reduce 4096 with a 128-gain vector and the op refuses it; `ops::rope` and
+    // `ops::context_softmax_attention` name the same head geometry. The probe allocates these
+    // five as {head_dim, heads, width, batch} (test_dspine_forward_real.cpp:714-720) and takes
+    // the FLAT view only where the split writes them; this port allocated them flat and
+    // re-viewed them head-wise only at the attention, so the head norm was the first stop the
+    // walk reached. The element count of the two forms is identical (query_width = head_dim x
+    // query_heads), so no byte and no byte count moves.
+    auto query_raw    = view.work.alloc(DType::BF16,
+                                        {shape.head_dim, shape.query_heads, width, batch});
+    auto key_raw      = view.work.alloc(DType::BF16,
+                                        {shape.head_dim, shape.key_value_heads, width, batch});
+    auto value        = view.work.alloc(DType::BF16,
+                                        {shape.head_dim, shape.key_value_heads, width, batch});
+    auto query        = view.work.alloc(DType::BF16,
+                                        {shape.head_dim, shape.query_heads, width, batch});
+    auto key          = view.work.alloc(DType::BF16,
+                                        {shape.head_dim, shape.key_value_heads, width, batch});
+    auto attended     = view.work.alloc(DType::BF16,
+                                        {shape.head_dim, shape.query_heads, width, batch});
     BridgeStreams bridge{
         view.work.alloc(DType::BF16, {shape.hidden, columns}),   // normalized
         view.work.alloc(DType::FP32, {columns}),                 // rms
@@ -522,7 +557,10 @@ void dspine_walk(DspineExecutionView view, const DspineWalkInputs& inputs,
                          view.cuda);
         }
         {
-            const std::array streams{query_raw, key_raw, value};
+            // The split writes the flat rows of the same bytes; the streams stay head-shaped.
+            const std::array streams{query_raw.view({shape.query, columns}),
+                                      key_raw.view({shape.key, columns}),
+                                      value.view({shape.key, columns})};
             ops::linear_split(hidden, block.query_key_value.weight, streams, view.cuda);
         }
         ops::rmsnorm(query_raw, block.query_norm, shape.rms_norm_eps, false, query, view.cuda);
@@ -530,9 +568,7 @@ void dspine_walk(DspineExecutionView view, const DspineWalkInputs& inputs,
         ops::rope(outputs.positions.view({columns}), shape.head_dim, shape.rope_theta, query, key,
                   view.cuda);
         ops::context_softmax_attention(
-            query.view({shape.head_dim, shape.query_heads, width, batch}),
-            key.view({shape.head_dim, shape.key_value_heads, width, batch}),
-            value.view({shape.head_dim, shape.key_value_heads, width, batch}), inputs.frontiers,
+            query, key, value, inputs.frontiers,
             inputs.valid_columns, inputs.table_rows, geometry, scale,
             ConstPagedKVBatchLayerView(view.context_layer(std::uint32_t(layer))), envelope,
             view.work, attended, view.cuda);
@@ -541,14 +577,15 @@ void dspine_walk(DspineExecutionView view, const DspineWalkInputs& inputs,
         // taken as its own op. Same math as the DFlash2 path's `project_add`, one launch apart,
         // and the probe records the geometry gap at the same step rather than behind a new
         // kernel.
-        project(attended, block.output, projected, view.work, view.cuda);
+        project(attended.view({shape.query, columns}), block.output, projected, view.work,
+                view.cuda);
         ops::residual_add(projected, residual, view.cuda);
         ops::rmsnorm(residual, block.post_attention_norm, shape.rms_norm_eps, false, hidden,
                       view.cuda);
         project_swiglu(hidden, block.mlp.gate_up, intermediate, view.work, view.cuda);
         project_add(intermediate, block.mlp.down, residual, view.work, view.cuda);
-        dspine_bridge(view, bridge, residual, shape, layer,
-                      layer + 1 == weights.layers.size());
+        dspine_bridge(view, bridge, residual, shape, columns, layer,
+                       layer + 1 == weights.layers.size());
         pre_normed = true;
     }
 
