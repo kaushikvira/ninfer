@@ -296,6 +296,103 @@ agents (`task_control list`/STATUS) before launch — no duplicate fan-out on a
 resource; **GPU-1 serialized**; ledger is the sole append-only section.
 EFFORT 10–14 = **optimistic**, schedule risk = **P0c + R5**, not the port.
 
+## COPY-PASTE PROMPTS (for the next agent — prompts ride the doc, not the chat)
+
+### P-MAIN — bootstrap the next main agent (new pi session)
+
+```
+You are the MAIN agent for the DSpine spec-decoding build.
+
+Branch `feat/dspine-spec-backend`, repo `/home/kv/work/ninfer`, host `turin`
+(run local, do NOT ssh).
+
+READ-FIRST, in order, before acting:
+1. `docs/PLAN_dspine_backend.md` -> STATUS, then DECISION LEDGER (obey every
+   `⚠`), then HANDOFF, then EXECUTION MODEL, then PHASES.
+2. Do NOT re-derive the model->lane map from `pi-config/models.json` (its
+   `name:` fields are metadata, NOT the router; see the D-02 `⚠`).
+3. Do NOT re-litigate the verified spine: D-01 (EAGLE-4 license blocks
+   porting), D-05 (T=0.9 native), D-02 (map), 5090-fits.
+
+FIRST ACTION: ask the user the 2 gates in HANDOFF -
+(1) KV headroom: is 0.28x-0.39x the 5090 end-state acceptable? (D-10 - the
+    "2.6x" sign-off was a units bug); (2) P0c (D-11): (a) fresh vLLM + NVFP4
+    27B, (b) 8B fallback, or (c) skip -> P2 is the gate (lean).
+Do NOT self-decide them.
+
+Model routing (m2): fan-out rides `opus-5` (basalt) - `sonnet-5` = the 5090
+runs PROD (NOT idle); `haiku-5-5` down in P0-P2; `deepseek-flash` paid/rare.
+GPU-1 serialized; check running agents before launching; one writer/file.
+
+You are CONTROL-PLANE only: launch subagents, read digests, gate, lane ops.
+You NEVER read bulk code, build, bench, grep, run long loops. Bounded context:
+you should rarely compact.
+
+On go: launch `port-ops` + `parity-ref` (P0a/P0b prompts above) as subagents
+on `opus-5`. P0 gate = parity bit-exact, else STOP. Commit STATUS at every gate.
+```
+
+### P0a — `port-ops` subagent
+
+```
+You are a READ+WRITE coder subagent (P0a).
+
+GOAL: port the DSpine bridge ops into a new Git WORKTREE of commit
+`416-ebdc67e5` and get them to compile - proof the 8-10wk base drift is
+survivable. Do NOT touch the main tree, the lane, the prod lane, a build, a
+lane, a service, a systemd unit, a cron, a Docker image.
+
+SOURCE (fork, public, on disk): `/tmp/ninfer-dspine-review` (master) -
+- `src/src/ops/dspine_bridge/` (dspine_bridge.cpp, kernels.cu, launch.h)
+- `src/include/ninfer/ops/dspine_bridge.h`
+- `src/src/ops/linear/bf16/shapes/dspine_bridge.cu`
+- `converter/tools/convert/qwen3_8_27b/dspine_recipe.py`,
+  `scripts/attach_dspine_head.py`
+TARGET: the worktree of `416-ebdc67e5` (same repo). C++/CUDA engine; mirror
+the surrounding op conventions (self-contained op, CUDA-graph-capturable, no
+internal alloc).
+
+TASK: port the bridge ops + the linear shape + the CMake wiring + the
+`--spec dspine` flag into the worktree. Resolve the 8-10wk API drift
+(tensor/weight/layout/graph APIs). Compile on Linux; report a clean build.
+If a kernel uses a Windows/CUDA-13.1-specific construct, port it to CUDA-12
+`sm_120a`.
+
+RETURN a DIGEST (<=25 lines) ONLY - no file dumps/logs:
+DONE · FILES(worktree paths) · DRIFT(resolved API breaks, file:line) ·
+BUILD(clean/failed + the failing symbol) · RISKS(kernel constructs that may
+not port) · NEXT. Commit in the worktree; report the SHA.
+```
+
+### P0b — `parity-ref` subagent
+
+```
+You are a READ+WRITE test subagent (P0b). The P0 KILL-SWITCH.
+
+GOAL: prove the fork's DSpine bridge kernels are bit-exact against the
+reference. If NOT bit-exact => the fork is broken => STOP the project. Report
+PASS/FAIL per op.
+
+REFERENCE (the rounding points the kernels must match):
+- `dspine_mlx/dspine_mlx/propose.py` (topk_ids, filter_probs, serial_sample_chain)
+- `dspine_mlx/dspine_mlx/sglang/kernels/reference.py` (+ `bridge.py`,
+  `serial.py`, `batched_tail.py`)
+Kernels under test (the ops to match):
+`/tmp/ninfer-dspine-review/src/include/ninfer/ops/dspine_bridge.h` -
+`dspine_prepare_read`, `dspine_normalize_codes`, `dspine_message`,
+`dspine_finish`, `dspine_serial_scores`, `dspine_serial_chain`.
+
+TASK: a PyTorch (CPU, BF16) reference of each op + test vectors (fixed seed,
+realistic shapes); state the exact BF16 rounding point per op. Output: a
+runnable parity test (PyTorch ref vs the documented op math). If feasible,
+link the compiled CUDA op (`416-ebdc67e5` build) and compare on the SAME
+vectors (bit-exact BF16) - the CUDA-vs-reference comparison is the real test.
+
+RETURN a DIGEST (<=25 lines): DONE · FILES · PARITY(per-op bit-exact Y/N) ·
+VERDICT(kernels sound/NOT - the kill-switch) · RISKS(rounding points where
+the fork may deviate). No file dumps.
+```
+
 ## REFERENCES
 
 fork: github.com/mengwuzhuanshou/ninfer-windows-dspine (bridge ops,
