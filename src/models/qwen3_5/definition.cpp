@@ -151,12 +151,20 @@ std::shared_ptr<const ModelDefinition> read_definition(const artifact::Reader& r
         for (const auto& layer : dspine_weights->layers) {
             count_weight(layer.input_norm);
             count_weight(layer.post_attention_norm);
-            count_weight(layer.attention.query_key_value);
+            // The draft layer is bound apart: these names are ranges of two packed objects, so
+            // the object set below counts each packed object once - the reported footprint is
+            // the bytes the drafter occupies, not the bytes its names mention.
+            count_weight(layer.attention.query);
+            count_weight(layer.attention.key);
+            count_weight(layer.attention.value);
+            count_weight(layer.attention.context_key);
+            count_weight(layer.attention.context_value);
             count_weight(layer.attention.query_norm);
             count_weight(layer.attention.key_norm);
             count_weight(layer.attention.output);
-            count_weight(layer.gate_up);
-            count_weight(layer.down);
+            count_weight(layer.mlp.gate);
+            count_weight(layer.mlp.up);
+            count_weight(layer.mlp.down);
         }
         count_weight(dspine_weights->bridge.codebook);
         count_weight(dspine_weights->bridge.early_read_weights);

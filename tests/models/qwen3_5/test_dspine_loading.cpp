@@ -53,6 +53,15 @@ struct DspineFixture {
     // A single table declared apart from the rest: the mixed and unsupported declarations the
     // binding must reject.
     std::map<std::string, std::pair<QType, QuantLayout>> table_overrides;
+    // The draft layers as one packed projection binding (`attention/query_key_value`,
+    // `mlp/gate_up`) instead of the split ranges of a packed object that the V3 recipe emits.
+    // The binding refuses this manifest; the case is defined, not untested.
+    bool fused_draft_layers = false;
+    // Mutations of the split ranges that describe no layout the drafter can read: a hole in a
+    // packed object, and a context projection that does not share its K/V rows.
+    bool short_packed_range = false;
+    bool overlapping_range  = false;
+    bool separate_context   = false;
 
     void tensor(const std::string& id, std::vector<std::uint64_t> shape, QType format = QType::BF16,
                 QuantLayout layout = QuantLayout::Contiguous) {
@@ -92,6 +101,20 @@ struct DspineFixture {
         tensor(name, shape);
         file.root["bindings"][name] = {{"object", name}};
         if (!input.empty()) { use(name, input); }
+    }
+
+    // One named range of a packed object, as the V3 manifest binds a draft layer's projections.
+    void range(const std::string& name, const std::string& object, std::uint64_t begin,
+               std::uint64_t end, const std::string& input) {
+        if (short_packed_range && name.ends_with("/value")) { end -= 128; }
+        if (overlapping_range && name.ends_with("/value")) {
+            const auto width = end - begin;  // the value range becomes the key range
+            begin -= width;
+            end -= width;
+        }
+        file.root["bindings"][name] = {
+            {"parts", Json::array({{{"object", object}, {"range", {begin, end}}}})}};
+        use(name, input);
     }
 
     // A bridge table: the same object/binding shape as parameter(), in the representation the
@@ -180,11 +203,50 @@ struct DspineFixture {
             const auto p = "dspine/layers/" + std::to_string(i) + "/";
             parameter(p + "input_norm", {h});
             parameter(p + "post_attention_norm", {h});
-            parameter(p + "attention/query_key_value", {q + 2 * k, h}, p + "query_projection_input");
+            if (fused_draft_layers) {
+                parameter(p + "attention/query_key_value", {q + 2 * k, h},
+                          p + "query_projection_input");
+                parameter(p + "mlp/gate_up", {2 * inter, h}, p + "mlp_input");
+            } else {
+                // The V3 shape: two packed objects, named apart by ranges, with the two context
+                // projections aliasing the K and V ranges. The `context_input` name is the
+                // manifest's, not the loader's - it is what the recipe's Use declares.
+                const std::string qkv = p + "attention/query_key_value";
+                tensor(qkv, {q + 2 * k, h});
+                const auto key_begin   = q * h;
+                const auto key_end     = (q + k) * h;
+                const auto value_begin = (q + k) * h;
+                const auto value_end   = (q + 2 * k) * h;
+                range(p + "attention/query", qkv, 0, key_begin, p + "query_projection_input");
+                range(p + "attention/key", qkv, key_begin, key_end, p + "query_projection_input");
+                range(p + "attention/value", qkv, value_begin, value_end,
+                      p + "query_projection_input");
+                // The context projections carry the K and V rows themselves: the manifest names
+                // the same ranges under both names.
+                const std::string context = [&] {
+                    if (!separate_context) { return qkv; }
+                    const auto id = p + "attention/context_storage";
+                    tensor(id, {2 * k, h});
+                    return id;
+                }();
+                const auto context_shift = separate_context ? key_begin : 0;
+                range(p + "attention/context_key", context, key_begin - context_shift,
+                      key_end - context_shift, "dspine/context_input");
+                range(p + "attention/context_value", context, value_begin - context_shift,
+                      value_end - context_shift, "dspine/context_input");
+                parameter(p + "attention/query_norm", {head_dim});
+                parameter(p + "attention/key_norm", {head_dim});
+                parameter(p + "attention/output", {h, q}, p + "attention_output");
+                const std::string gate_up = p + "mlp/gate_up";
+                tensor(gate_up, {2 * inter, h});
+                range(p + "mlp/gate", gate_up, 0, inter * h, p + "mlp_input");
+                range(p + "mlp/up", gate_up, inter * h, 2 * inter * h, p + "mlp_input");
+                parameter(p + "mlp/down", {h, inter}, p + "mlp_product");
+                continue;
+            }
             parameter(p + "attention/query_norm", {head_dim});
             parameter(p + "attention/key_norm", {head_dim});
             parameter(p + "attention/output", {h, q}, p + "attention_output");
-            parameter(p + "mlp/gate_up", {2 * inter, h}, p + "mlp_input");
             parameter(p + "mlp/down", {h, inter}, p + "mlp_product");
         }
         // Bridge + TG/TSV tables. codebook/tg/tsv carry the varied representation; the rest of
@@ -207,9 +269,13 @@ struct DspineFixture {
         BridgeGeometry bridge                                       = kReference,
         QType table_format                                          = QType::BF16,
         QuantLayout table_layout                                    = QuantLayout::Contiguous,
-        std::map<std::string, std::pair<QType, QuantLayout>> table_overrides = {})
+        std::map<std::string, std::pair<QType, QuantLayout>> table_overrides = {},
+        bool fused_draft_layers = false, bool short_packed_range = false,
+        bool overlapping_range = false, bool separate_context = false)
         : bridge(bridge), table_format(table_format), table_layout(table_layout),
-          table_overrides(std::move(table_overrides)) {
+          table_overrides(std::move(table_overrides)), fused_draft_layers(fused_draft_layers),
+          short_packed_range(short_packed_range), overlapping_range(overlapping_range),
+          separate_context(separate_context) {
         file.payload.clear();
         file.root = {{"components",
                       {{"text",
@@ -444,6 +510,19 @@ void bridge_binder_check_unchanged() {
         "a BF16 request for an NVFP4-declared table was bound");
 }
 
+// The reported footprint is the bytes of the objects the drafter reads, so a draft layer bound
+// as ranges of a packed object costs the packed object once. This counts what the fixture puts
+// under `dspine/` and must equal what the loader reports.
+std::uint64_t packed_drafter_bytes(const artifact::Reader& reader) {
+    std::uint64_t bytes = 0;
+    for (const auto& object : reader.directory().objects) {
+        const auto& id = std::visit(
+            [](const auto& typed) -> const std::string& { return typed.id; }, object);
+        if (id.starts_with("dspine/")) { bytes += artifact::object_bytes(object); }
+    }
+    return bytes;
+}
+
 void dspine_loads() {
     DspineFixture fixture;
     fixture.add_dspine_component();
@@ -458,7 +537,101 @@ void dspine_loads() {
     require(plan->config().dspine->target_layer_ids.size() == 1, "DSpine target taps mismatch");
     require(plan->weights().dspine->layers.size() == 2, "DSpine weight layer count mismatch");
     require(plan->dspine_bytes() > 0, "DSpine byte budget was not reported");
-    std::cout << "dspine load: " << plan->dspine_bytes() << " bytes reported\n";
+    require(plan->dspine_bytes() == packed_drafter_bytes(reader),
+            "the reported DSpine footprint is not the objects the drafter reads");
+    std::cout << "dspine load: " << plan->dspine_bytes() << " bytes reported ("
+              << packed_drafter_bytes(reader) << " in the packed objects)\n";
+}
+
+// The draft layer is bound apart over two packed objects, and the two context projections carry
+// the K and V rows themselves. This is the layout both shipped V3 artifacts carry.
+void dspine_binds_the_split_draft_layers() {
+    DspineFixture fixture;
+    fixture.add_dspine_component();
+    fixture.file.write();
+    const artifact::Reader reader(fixture.file.entry);
+    const auto plan = q35::read_definition(reader, {.speculative = SpeculativeBackend::Dspine});
+    const auto& w = plan->weights().dspine.value();
+    const std::array names{std::string_view("query"), std::string_view("key"),
+                           std::string_view("value"), std::string_view("context_key"),
+                           std::string_view("context_value")};
+    const std::array ids{w.layers[0].attention.query, w.layers[0].attention.key,
+                         w.layers[0].attention.value, w.layers[0].attention.context_key,
+                         w.layers[0].attention.context_value};
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        const auto& binding = plan->parameter(ids[i]).binding;
+        require(!binding.whole_object && binding.parts.size() == 1,
+                (std::string(names[i]) + ": a split projection is one range of a packed object")
+                    .c_str());
+        std::cout << "  dspine/layers/0/attention/" << names[i] << " "
+                  << plan->parameter(ids[i]).name << " over the packed object at element "
+                  << binding.parts[0].begin << '-' << binding.parts[0].end << '\n';
+    }
+    // Q, K, V, context K and context V are five names over the same object; gate and up over one.
+    const auto packed_of = [&](WeightId id) {
+        return plan->parameter(id).binding.parts.at(0).object;
+    };
+    require(packed_of(w.layers[0].attention.query) == packed_of(w.layers[0].attention.key) &&
+                packed_of(w.layers[0].attention.key) == packed_of(w.layers[0].attention.value),
+            "the split Q, K and V projections do not share one packed object");
+    require(packed_of(w.layers[0].attention.context_key) == packed_of(w.layers[0].attention.key),
+            "the context key projection is not the key projection's rows");
+    require(packed_of(w.layers[0].attention.context_value) ==
+                packed_of(w.layers[0].attention.value),
+            "the context value projection is not the value projection's rows");
+    require(packed_of(w.layers[0].mlp.gate) == packed_of(w.layers[0].mlp.up),
+            "the split gate and up projections do not share one packed object");
+    require(packed_of(w.layers[0].mlp.gate) != packed_of(w.layers[0].attention.query),
+            "the attention and MLP packs are the same object");
+    std::cout << "dspine draft layers bound apart: " << names.size()
+              << " attention names over one pack, gate and up over another\n";
+    require(plan->dspine_bytes() == packed_drafter_bytes(reader),
+            "the split layout's reported footprint counts a packed object twice");
+}
+
+// The two defined manifest shapes, both refused by name: the fused naming this engine does not
+// bind, and the split names arranged so that they describe no packed tensor.
+void dspine_rejects_manifests_it_does_not_bind() {
+    DspineFixture fused;
+    fused.fused_draft_layers = true;
+    rejects_with([&] {
+        fused.add_dspine_component();
+        fused.file.write();
+        const artifact::Reader reader(fused.file.entry);
+        (void)q35::read_definition(reader, {.speculative = SpeculativeBackend::Dspine});
+    }, "a draft layer bound as one projection is not a layout this engine binds",
+        "a fused-only manifest was bound");
+
+    DspineFixture hole;
+    hole.short_packed_range = true;
+    rejects_with([&] {
+        hole.add_dspine_component();
+        hole.file.write();
+        const artifact::Reader reader(hole.file.entry);
+        (void)q35::read_definition(reader, {.speculative = SpeculativeBackend::Dspine});
+    }, "logical shape differs from Binding coverage",
+        "a split group that leaves rows of its pack unread was bound");
+
+    DspineFixture overlap;
+    overlap.overlapping_range = true;
+    rejects_with([&] {
+        overlap.add_dspine_component();
+        overlap.file.write();
+        const artifact::Reader reader(overlap.file.entry);
+        (void)q35::read_definition(reader, {.speculative = SpeculativeBackend::Dspine});
+    }, "a packed group covers its object in order",
+        "two split projections that read the same rows of a pack were bound");
+
+    DspineFixture detached;
+    detached.separate_context = true;
+    // The context names are the K and V names' own bytes, and the loader keeps them in order.
+    rejects_with([&] {
+        detached.add_dspine_component();
+        detached.file.write();
+        const artifact::Reader reader(detached.file.entry);
+        (void)q35::read_definition(reader, {.speculative = SpeculativeBackend::Dspine});
+    }, "must share storage with",
+        "context projections that do not carry the K and V rows were bound");
 }
 
 void dspine_rejects_mismatch() {
@@ -717,6 +890,8 @@ int main() {
         dspine_recipe_vocabulary_accepted();
         dspine_rejects_unknown_members();
         dspine_rejects_unimplemented_values();
+        dspine_binds_the_split_draft_layers();
+        dspine_rejects_manifests_it_does_not_bind();
         std::cout << "DSpine load-side checks passed\n";
         return 0;
     } catch (const std::exception& error) {
