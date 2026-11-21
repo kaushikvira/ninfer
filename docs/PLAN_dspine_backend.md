@@ -56,11 +56,23 @@ Drafter footprint measures **1.31568 GiB = D-14 −2.5%** on the real artifact.
    0–2/240 argmax flips; table parity is normwise (gross-error ceiling 1e-3, clean case
    1.3e-7), while the precision claim rests on bit-exact argmax rows.
 
-**What I'd do next (in order)**: finish the walk → criterion 4 (T=0 byte-exact vs the
-torch reference) → graph capture of the round → **then** measure DSpine vs DFlash2 K7
-on GPU 1 with N≥3 repeats at T=0.9 plus a T=0 arm (D-24 A1). Only if that number beats
-or matches DFlash2 does a P3 window make sense — and remember GPU 0 has ~0.5 GiB of
-slack, so prod teardown must precede anything landing on the 5090.
+**The bite point, now precisely known (D-42).** The walk runs, the round is a pure
+function of its inputs, and **acceptance is provably unmeasurable in the probe** — the
+accept op verifies against the *target's* logits, the probe has no target, and on its
+synthetic features the prod policy is **degenerate** (1 of 16 candidates survives the
+filter, T=0.9 and T=0 are the same arm). So the deciding number is **not** a probe row:
+
+> **The bar is DFlash2's measured 3.0 accepted drafts/round** (2.998 over 214,153 live
+> rounds at K=7, from prod's own `/metrics`). To beat it, DSpine must run a **real round
+> on a real target** — i.e. the `a5000-2` lane arm the registry already scopes.
+
+**What I'd do next (in order)**: ① wire the DSpine round into the engine's **decode +
+accept** path behind `--spec dspine` (in flight `mwqjfvzx-66f3`; strictly backend-gated,
+DFlash2 untouched, same accept op and same accounting so the comparison is
+apples-to-apples) → ② a **captured real-prefill fixture** so features are not synthetic
+→ ③ run the **a5000-2 lane A/B**: DSpine K15 vs DFlash2 K7, N≥3, T=0.9 **plus** a T=0
+arm → ④ only if that beats ~3.0 does a P3 window make sense. Remember **GPU 0 has
+~0.5 GiB of slack**: prod teardown must precede anything landing on the 5090.
 
 status: active · updated: 2026-11-22 · branch: feat/dspine-spec-backend (base main 70afbf33)
 
