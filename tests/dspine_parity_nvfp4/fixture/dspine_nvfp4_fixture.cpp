@@ -3,8 +3,18 @@
 // output bytes so a Python reference can compare them.
 //
 // Superset of tests/dspine_parity/fixture/dspine_fixture.cpp (P0b), extended with
-//   * --nvtbl=NAME:CODES:SCALES:DIVISOR  (a block-scaled NVFP4 gather table), and
-//   * --op=serial_tail                   (the sampled tail op, with the request policy).
+//   * --nvtbl=NAME:CODES:SCALES:DIVISOR  (a block-scaled NVFP4 gather table),
+//   * --op=serial_tail                   (the sampled tail op, with the request policy),
+//   * --q8=NAME:CODES:SCALES             (a Q8_G32_FP16 group-row-split head),
+//   * --head=fp8|q8                      (which head serial_scores must be given),
+//   * --scores=0|1|2                     (emit the FP32 [batch,16,16,drafts] score table that
+//                                        serial_scores computes and serial_tail consumes; 2
+//                                        declares it BF16, which the op must refuse),
+//   * --pad=0|1                          (pad a Q8 head's code rows to 128 columns, the way
+//                                        core/weight_view.cpp materializes a RowSplit weight),
+//   * --q8gate=none|group16|scalebf16|padodd
+//                                        (warp one metadata field of the Q8 head so the op's
+//                                        head gate has to refuse the weight).
 // The P0b fixture is left untouched: the BF16 tables are still what P0b verified, and the
 // whole point here is to drive the SAME ops through their NVFP4 gather branch.
 //
@@ -144,6 +154,14 @@ struct Args {
     std::vector<std::pair<std::string, std::string>> tables;
     std::vector<std::tuple<std::string, std::string, std::string, float>> nvtables;
     std::vector<std::tuple<std::string, std::string, std::string>> fp8s;
+    std::vector<std::tuple<std::string, std::string, std::string>> q8s;
+    std::string head  = "fp8";
+    // 0 = no score table, 1 = the FP32 one the tail consumes, 2 = the same tensor declared BF16
+    // (the shape/dtype gate's teeth: the op must refuse it, not coerce it).
+    std::int32_t scores = 0;
+    // A warped Q8 head metadata field for the head gate's teeth (see q8_row_split).
+    std::string q8gate;
+    bool        pad    = false;
 
     // serial_tail request policy (K1 = T 1.0 / top_k 20 / top_p 1.0 / min_p 0).
     float temperature = 1.0f;
@@ -322,10 +340,80 @@ struct Builder {
             weight.scale_dtype = DType::BF16;
             weight.n = n;
             weight.k = k;
+            weight.ndim = 2;
+            weight.shape[0] = weight.padded_shape[0] = n;
+            weight.shape[1] = weight.padded_shape[1] = k;
+            weight.scale_ne[0] = n;
+            weight.scale_nb[0] = 2;
+            weight.group_size = static_cast<std::uint32_t>(k);
+            weight.group = k;
             return weight;
         }
         die("missing --fp8 " + key);
         return {};
+    }
+
+    static std::int32_t align_up(std::int32_t value, std::int32_t multiple) {
+        return static_cast<std::int32_t>((static_cast<std::int64_t>(value) + multiple - 1) /
+                                         multiple) *
+               multiple;
+    }
+
+    // A Q8_G32_FP16 head, built the way core/weight_view.cpp materializes a RowSplit weight: the
+    // code plane is one signed byte per element at the PADDED row stride (align_up(k, 128)) and
+    // the scale plane one FP16 per (row, 32-column group). --q8 takes the planes at the padded
+    // geometry the driver wrote, so a padded head exercises the stride the op must honour.
+    //
+    // --q8gate=defect warps one METADATA field of that weight (never the planes) so the op's head
+    // gate has to refuse it: the acceptance of the tower's format is only a decision if the gate
+    // that makes it bites. `group16` claims a group of 16, `scalebf16` a BF16 scale plane, `padodd`
+    // a padded column count that is not a whole number of groups.
+    Weight q8_row_split(const std::string& key, std::int32_t n, std::int32_t k) {
+        for (const auto& [name, codes, scales] : args.q8s) {
+            if (name != key) { continue; }
+            const std::int32_t padded = args.pad ? align_up(k, 128) : k;
+            if (padded % 32 != 0) { die("Q8 head needs a column count divisible by 32"); }
+            const std::int32_t groups = padded / 32;
+            Weight weight{};
+            weight.device = Device::cuda(device);
+            weight.qtype = QType::Q8_G32_FP16;
+            weight.layout = QuantLayout::RowSplit;
+            weight.qdata = upload(dev, codes, static_cast<std::size_t>(n) * padded);
+            weight.scales =
+                upload(dev, scales, static_cast<std::size_t>(n) * groups * 2);
+            weight.scale_dtype = DType::FP16;
+            weight.n = n;
+            weight.k = k;
+            weight.ndim = 2;
+            weight.shape[0] = weight.padded_shape[0] = n;
+            weight.shape[1] = k;
+            weight.padded_shape[1] = padded;
+            weight.scale_ne[0] = groups;
+            weight.scale_ne[1] = n;
+            weight.scale_nb[0] = 2;
+            weight.scale_nb[1] = groups * 2;
+            weight.scale_nb[2] = weight.scale_nb[3] = static_cast<std::int64_t>(groups) * n * 2;
+            weight.group_size = 32;
+            weight.group = 32;
+            if (args.q8gate == "group16") {
+                weight.group = 16;
+            } else if (args.q8gate == "scalebf16") {
+                weight.scale_dtype = DType::BF16;
+            } else if (args.q8gate == "padodd") {
+                weight.padded_shape[1] = k + 16;
+            } else if (!args.q8gate.empty() && args.q8gate != "none") {
+                die("unknown --q8gate '" + args.q8gate + "'");
+            }
+            return weight;
+        }
+        die("missing --q8 " + key);
+        return {};
+    }
+
+    // The head serial_scores scores the candidates against: the P0b FP8 row-scaled one, or the
+    // tower's Q8 one. Two representations of one job; the op dequantizes either on gather.
+    Weight head_weight(std::int32_t n, std::int32_t k) {
+        return args.head == "q8" ? q8_row_split("head", n, k) : fp8_row("head", n, k);
     }
 
 };
@@ -371,6 +459,17 @@ Args parse(int argc, char** argv) {
         } else if (argument.rfind("--fp8=", 0) == 0) {
             const auto body = split(value("--fp8="), ':');
             args.fp8s.emplace_back(body.at(0), body.at(1), body.at(2));
+        } else if (argument.rfind("--q8=", 0) == 0) {
+            const auto body = split(value("--q8="), ':');
+            args.q8s.emplace_back(body.at(0), body.at(1), body.at(2));
+        } else if (argument.rfind("--head=", 0) == 0) {
+            args.head = value("--head=");
+        } else if (argument.rfind("--scores=", 0) == 0) {
+            args.scores = static_cast<std::int32_t>(std::stoi(value("--scores=")));
+        } else if (argument.rfind("--q8gate=", 0) == 0) {
+            args.q8gate = value("--q8gate=");
+        } else if (argument.rfind("--pad=", 0) == 0) {
+            args.pad = value("--pad=") == "1";
         } else if (argument.rfind("--nvtbl=", 0) == 0) {
             const auto body = split(value("--nvtbl="), ':');
             if (body.size() != 4) { die("--nvtbl wants NAME:CODES:SCALES:DIVISOR"); }
@@ -469,7 +568,10 @@ int main(int argc, char** argv) {
                                cudaMemcpyDeviceToDevice),
                     "copy refined residual out");
         }
-        // 5) serial_scores: -> idx [16, D, B]
+        // 5) serial_scores: -> idx [16, D, B], and with --scores=1 the FP32 score table
+        //    [B, 16 (candidate), 16 (sender), D] that serial_tail consumes (--head=fp8|q8 picks
+        //    which head representation the op is handed, --q8gate warps its metadata, --scores=2
+        //    asks for that table as BF16).
         else if (args.op == "serial_scores") {
             Ten cand = builder.make("cand", DType::I32, {16, i32(D), i32(B)});
             Ten raw = builder.make("raw", DType::BF16, {i32(H), i32(W), i32(B)});
@@ -478,14 +580,22 @@ int main(int argc, char** argv) {
             Ten anchors = builder.make("anchors", DType::I32, {i32(B)});
             Ten norm_w = builder.make("norm_w", DType::BF16, {i32(H)});
             Ten gate_bias = builder.make("gate_bias", DType::BF16, {i32(R)});
-            Weight head = builder.fp8_row("head", i32(V), i32(H));
+            Weight head = builder.head_weight(i32(V), i32(H));
             Weight tg = builder.gather_table("tg", i32(V), i32(R));
             Weight tsv = builder.gather_table("tsv", i32(V), i32(2 * R));
             auto idx = builder.out_tensor("idx", DType::I32, {16, i32(D), i32(B)});
+            Tensor scores;
+            Tensor* scores_ptr = nullptr;
+            if (args.scores != 0) {
+                scores = builder.out_tensor("scores",
+                                            args.scores == 2 ? DType::BF16 : DType::FP32,
+                                            {i32(B), 16, 16, i32(D)});
+                scores_ptr = &scores;
+            }
             dspine_serial_scores(builder.tensor(cand), builder.tensor(raw), builder.tensor(rms),
                                  builder.tensor(packed_q), builder.tensor(anchors),
                                  builder.tensor(norm_w), builder.tensor(gate_bias), head, tg, tsv,
-                                 i32(W), idx, stream);
+                                 i32(W), idx, scores_ptr, stream);
         }
         // 5b) serial_tail: the sampled sibling. table FP32 [B, 16, 16, D] (candidate, sender,
         //     slot, row; first axis fastest), cand I32 [B, D, 16], positions I32 [B].
