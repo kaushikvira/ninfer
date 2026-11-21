@@ -62,6 +62,13 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   `Tencent/DSpine` (`dspine_mlx`, `sglang_dspine`) + merged vLLM PR #67094
   (`qwen3_dspine.py`, `dspine/speculator.py`, ~600 LOC) = the known-good design.
 
+- **D-2026-11-21-08** — GPU P3/P4 co-sizing. **P3/P4 prod-on-a5000-2 sizing =
+  a5000-2 KV-capped ≈30** (a5000-2 30 + basalt 39 + tts 3 = 72/72 tight; drop
+  tts → 69 fits). NOT the 36 dev/test slice.
+- **D-2026-11-21-09** — **Resync a5000-2 to prod `416-ebdc67e5` before the
+  P3/P4 window** (prod-on-a5000-2 = prod-parity, not the stale `77c2e5e2`); P4
+  resyncs a5000-2 back to the DSpine build.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
@@ -156,6 +163,51 @@ NEVER main. **If main reads >1k lines of bulk, it broke the contract.**
 **Main's loop:** `read STATUS → fan-out subagents (parallel, worktree) → read
 digests → commit (subagents commit worktree; I squash-merge) → update STATUS →
 gate (human)`. One read + N digests per phase — bounded main context.
+
+## SELF-REVIEW (2026-11-21, main) — fixes to apply
+
+- **BLOCKER-1 (D-03 GPU co-sizing).** P3/P4 prod-on-a5000-2 full-ctx `36 +
+  basalt 39 + tts 3 = 78 > 72 GiB` → **doesn't fit.** The doc's "30 GiB free"
+  is the *dev* rule (a5000-2 test). Fix: P3/P4 run a5000-2 **KV-capped ≈30**
+  (`30+39+3=72` tight; `drop tts → 3` → `69` fits). P3/P4 sizing =
+  "a5000-2 ≈30, drop tts if tight", NOT the 36 test-slice.
+- **MAJOR-2 (P0c vLLM pin).** DSpine merged vLLM 2026-11-16; fleet vLLM lane
+  images are older → P0c needs a **newer vLLM nightly (budget)**; and the
+  DSpine `--context-length 131072` caps the **stock-target probe at 131k ctx**
+  (V3-native P2 carries the 262k measurement).
+- **MAJOR-3 (P4 sequencing).** P3 prod-on-a5000-2 = stale `77c2e5e2` (3 builds
+  behind) → prod degraded the window. **Resync a5000-2 to `416-ebdc67e5`
+  before** the window; P4 resyncs it back to the DSpine build.
+- **MINOR-4.** Confirm the bench computes tok/round **identically** for
+  DFlash2 (4.75) vs DSpine, same corpus.
+- **SOUND:** D-02 map (self-consistent, opus-5=basalt survives every phase),
+  D-05 T=0.9, EAGLE license, compaction/context model.
+
+## VERIFIER REVIEW (2026-11-21, `mwpxt2ws-a170`, opus-5, fresh context)
+
+- **MAJOR-1 = HALLUCINATION — DISCARDED.** The verifier cited
+  `~/work/seiso-vira-rocks-gateway/docker/litellm/config.yml` (with line refs)
+  refuting D-02. **That repo does not exist on turin** (gateway = vira.rocks
+  box, per AGENTS.md, NOT turin); no litellm `config.yml` in any repo; the only
+  in-repo reference is `models.json` `name:` (D-02 says metadata). D-02
+  reaffirmed — owner-given, not repo-verifiable. (This is why the verifier is
+  itself verified: a fabricated refutation of a locked owner fact.)
+- **ADOPTED minors:**
+  - **#1** DSpine `--context-length 131072` vs our 262144 = **2×** → the stock
+    target probe **cannot run the 262k slice** (OOM). P0c: probe ≤131k only;
+    262k lives at P2 V3-native.
+  - **#2** The gate (`bench/tests/gate.py`) checks needles/tools — **no
+    acceptance length.** P2 gate = **A/B decode result**, not `gate.py`.
+  - **#3** P4 "resync a5000-2 to prod" is **incoherent** (prod build = the
+    DSpine build). Fix: **rebuild a5000-2 from `feat/dspine-spec-backend`**
+    (full image build) — that IS the promotion; a resync is a no-op.
+  - **#4** **LOC undercounted.** Public DSpine = **1596 LOC** (not 720; that
+    was the bridge subset). Our DFlash2 draft = `draft.cpp/.h` **589 LOC**
+    peer + **234 dflash refs across 41 files** = the exec path (589 peer +
+    41-file wiring). Effort **10–14 → ~15–20**; P0 de-risks, it does not
+    guarantee a number. **P0 = go/no-go, not ~15–20 as a promise.**
+- **VERDICT:** no blockers; D-02 reaffirmed; **plan SOLID** with the committed
+  fixes (self-review BLOCKER-1/MAJOR-2-3, verifier #1–#4). Ready for P0.
 
 ## REFERENCES
 
