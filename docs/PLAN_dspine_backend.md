@@ -1,6 +1,6 @@
 # PLAN — DSpine speculative-decoding backend for NInfer
 
-status: active · updated: 2026-11-21 · branch: feat/dspine-spec-backend (base main 70afbf33)
+status: active · updated: 2026-11-22 · branch: feat/dspine-spec-backend (base main 70afbf33)
 
 ## SESSION START — BOOTSTRAP (you are the MAIN agent; run to final completion)
 
@@ -37,14 +37,23 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- phase: **P0 — GATED on P0c (1 gate); NOT launched** (see **HANDOFF**)
+- phase: **P0 — LAUNCHED** (P0a port-ops + P0b parity-ref, both on `opus-5`);
+  P0c **SKIPPED by user decision (D-17)** → the **P2 V3-native A/B is the
+  accept gate**
 - done: plan; 4 reviews (self / verifier `mwpxt2ws` / D-14 drafter-swap /
   `mwpya6mp` coherence); spine verified (D-01 license, D-05 T=0.9, D-02 map,
   5090-fits, D-14 drafter-swap); fixes → **D-10..14**
-- next: **get the P0c decision → P0a+P0b fan-out (opus-5) → P0c per D-11**
-- open-risks: R5 drift (8–10 wk, MED) · R3 V3-tower accept (P2) · **P0c
-  feasibility (D-11)**
-- last-gate: `mwpya6mp` coherence verifier **PENDING**; **1 gate open (P0c)**
+- next: **P0 gate = P0b parity bit-exact** (else STOP) → P1 dev (port to
+  portability + `--spec dspine` + converter + parity tests)
+- fail-safe: P0c skipped ⇒ **no cheap early accept abort**; the first accept
+  numbers now arrive at **P2 V3-native**. If R4 looks real, the K-sweep sweep
+  on a5000-2 (P2) is the earliest abort point.
+- open-risks: R5 drift (8–10 wk, MED) · R3 V3-tower accept (P2) · R4 accept
+  <~5 tok/round (P2 now owns it)
+- last-gate: **P0c decided 2026-11-22 → (c) skip** (`D-2026-11-21-17`)
+- artifacts: port worktree `/tmp/ninfer-dspine-port` (branch `feat/dspine-port`
+  off `f9c00d50`, = main + docs) · fork clone `/tmp/ninfer-dspine-review` ·
+  Tencent reference clone `/tmp/dspine-ref`
 
 ## DECISION LEDGER (append-only; `⚠` = a correction, obey it)
 
@@ -153,6 +162,14 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   SUCCESS ~**65-75%**. **Bonus: `pipeline/dflash2-retrain/` = a stock→V3 retrain
   capability (retrain the drafter for V3) — a DFlash2 path AND the DSpine
   ceiling-raiser.**
+
+- **D-2026-11-21-17** — **P0c DECIDED by the user (gate): option (c) — SKIP the
+  stock-target vLLM probe.** No fresh vLLM nightly, no NVFP4-27B/FLASHINFER
+  SM120 gamble. The **P2 V3-native A/B on a5000-2 is the accept gate**.
+  Consequence (accept for it explicitly): R4 has **no cheap early abort** — the
+  first real accept numbers arrive only after P1/P2 exec-path work lands.
+  P0 is therefore **parity-only** (P0b bit-exact is still the kill-switch for a
+  broken fork).
 
 ## OBJECTIVE
 
