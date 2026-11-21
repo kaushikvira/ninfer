@@ -3,6 +3,8 @@
 #include "models/qwen3_5/load/bindings.h"
 #include "models/qwen3_5/expert_weights.h"
 
+#include <unordered_set>
+
 namespace ninfer::models::qwen3_5 {
 
 struct ModelDefinition::Impl {
@@ -18,6 +20,7 @@ struct ModelDefinition::Impl {
     std::vector<moe::BankDescription> banks;
     std::vector<WeightParent> parents;
     std::vector<BoundWeight> descriptions;
+    std::uint64_t dspine_bytes = 0;
 };
 
 ModelDefinition::ModelDefinition(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -39,6 +42,8 @@ const artifact::ArtifactId& ModelDefinition::artifact_id() const { return impl_-
 const artifact::MaterializationStats& ModelDefinition::resource_stats() const {
     return impl_->resource_stats;
 }
+
+std::uint64_t ModelDefinition::dspine_bytes() const noexcept { return impl_->dspine_bytes; }
 
 const artifact::ParameterReference& ModelDefinition::parameter(WeightId id) const {
     return impl_->references.at(id.index);
@@ -85,6 +90,14 @@ std::shared_ptr<const ModelDefinition> read_definition(const artifact::Reader& r
         out->weights.draft->token_embedding = out->weights.text.token_embedding;
         out->weights.draft->output_head     = out->weights.text.output_head;
     }
+    if (out->config.dspine) {
+        out->weights.dspine =
+            dspine::bind_weights(bindings, *out->config.dspine,
+                                 {text.hidden_size, text.vocab_size, text.num_hidden_layers},
+                                 std::string(options.speculative_component()));
+        out->weights.dspine->token_embedding = out->weights.text.token_embedding;
+        out->weights.dspine->output_head     = out->weights.text.output_head;
+    }
     if (options.proposal_enabled()) {
         const auto& proposal = reader.directory().component("text").proposal;
         if (!proposal) {
@@ -113,6 +126,48 @@ std::shared_ptr<const ModelDefinition> read_definition(const artifact::Reader& r
         out->weights.draft->output_head_use =
             bindings.use(out->weights.draft->output_head,
                          std::string(options.speculative_component()) + "/final_hidden");
+    }
+    if (out->weights.dspine) {
+        out->weights.dspine->output_head_use =
+            bindings.use(out->weights.dspine->output_head,
+                         std::string(options.speculative_component()) + "/final_hidden");
+        // Byte-budget report: surface the DSpine draft's actual size at load so P2/P3 can size
+        // against it. Sum the bytes of all objects referenced by the DSpine weights.
+        std::unordered_set<std::size_t> counted;
+        const auto& dspine_weights = out->weights.dspine;
+        auto count_object = [&](artifact::ObjectHandle handle) {
+            if (counted.insert(handle.index).second) {
+                out->dspine_bytes += artifact::object_bytes(reader.directory().object(handle));
+            }
+        };
+        auto count_weight = [&](WeightId id) {
+            for (const auto& part : bindings.at(id).reference.binding.parts) {
+                count_object(part.object);
+            }
+        };
+        count_weight(dspine_weights->feature_projection);
+        count_weight(dspine_weights->context_norm);
+        count_weight(dspine_weights->final_norm);
+        for (const auto& layer : dspine_weights->layers) {
+            count_weight(layer.input_norm);
+            count_weight(layer.post_attention_norm);
+            count_weight(layer.attention.query_key_value);
+            count_weight(layer.attention.query_norm);
+            count_weight(layer.attention.key_norm);
+            count_weight(layer.attention.output);
+            count_weight(layer.gate_up);
+            count_weight(layer.down);
+        }
+        count_weight(dspine_weights->bridge.codebook);
+        count_weight(dspine_weights->bridge.early_read_weights);
+        count_weight(dspine_weights->bridge.read_weight);
+        count_weight(dspine_weights->bridge.feature_write_weights);
+        count_weight(dspine_weights->bridge.gate);
+        count_weight(dspine_weights->bridge.gate_bias);
+        count_weight(dspine_weights->bridge.predecessor_gate);
+        count_weight(dspine_weights->bridge.prev);
+        count_weight(dspine_weights->bridge.tg);
+        count_weight(dspine_weights->bridge.tsv);
     }
     auto pending            = std::move(bindings.weights);
     out->banks              = describe_expert_weights(reader, out->weights, pending);

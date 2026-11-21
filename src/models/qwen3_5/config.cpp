@@ -251,6 +251,11 @@ Config parse_config(const artifact::Directory& directory, const LoadOptions& opt
                 {out.text.hidden_size, out.text.vocab_size, out.text.num_hidden_layers},
                 options.dflash2());
         }
+        if (options.speculative == SpeculativeBackend::Dspine) {
+            out.dspine = dspine::parse_config(
+                directory.component(options.speculative_component()),
+                {out.text.hidden_size, out.text.vocab_size, out.text.num_hidden_layers});
+        }
         return out;
     } catch (const std::exception& error) {
         throw ArtifactError(std::string("Qwen3.5 config: ") + error.what());
