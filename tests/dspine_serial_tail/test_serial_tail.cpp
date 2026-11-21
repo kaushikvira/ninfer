@@ -84,6 +84,7 @@ std::vector<Case> cases() {
         CASE(minp02_t07),
         CASE(lowtemp_t005),
         CASE(prod_batch2_drafts3),
+        CASE(k1_proper_t10),
     };
 }
 
