@@ -277,6 +277,11 @@ public:
         // object and the drafter carries no copy of it (D-37).
         out.token_embedding = native_weight(model_.weight(w.token_embedding).view);
         out.bridge.codebook = native_weight(model_.weight(w.bridge.codebook).view);
+        // The head by its DSpine use: `text/output_head` carries four declared uses, so the id
+        // form of `weight_input` (models/common/weights.cpp:17) refuses it and the round names
+        // `dspine/final_hidden` instead - the use the manifest gives this drafter. Same object,
+        // same bytes, the declared policy of the use it is read under.
+        out.output_head = linear(w.output_head_use);
         out.bridge.gate             = linear(w.bridge.gate);
         out.bridge.predecessor_gate = linear(w.bridge.predecessor_gate);
         out.bridge.prev             = linear(w.bridge.prev);

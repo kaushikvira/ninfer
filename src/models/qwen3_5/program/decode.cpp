@@ -179,7 +179,10 @@ void RankProgramImpl::run_dspine_draft(std::uint32_t batch_value, std::uint32_t 
                                        &*resources.dflash->full},
         walk_inputs, walk_outputs,
         ops::ContextAttentionExecutionEnvelope{minimum, maximum});
-    const execution::DspineTailView view{parameters.text.output_head.weight,
+    // The head comes from the drafter's own binding, i.e. from the head's `dspine/final_hidden`
+    // use, not from the text tower's binding of the same object (which carries that arm's
+    // `text/final_hidden` policy).
+    const execution::DspineTailView view{parameters.dspine->output_head.weight,
                                          parameters.dspine->final_norm,
                                          parameters.dspine->gate_bias,
                                          parameters.dspine->tg,

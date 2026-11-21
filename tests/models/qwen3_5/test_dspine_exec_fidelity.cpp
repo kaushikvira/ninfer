@@ -1113,16 +1113,32 @@ int main(const int argc, char** argv) {
                     static_cast<unsigned long long>(after / 1024 / 1024));
         std::fflush(stdout);
         // The binding census. The executor builds its `DspineParameters` one projection at a
-        // time through `Prepare::linear(WeightId)`
-        // (src/models/qwen3_5/execution/parameters.cpp:367-427), and the `WeightId` form of
+        // time through `Prepare::linear(WeightId)` and `Prepare::linear(WeightUseId)`
+        // (src/models/qwen3_5/execution/parameters.cpp:28-36), and the `WeightId` form of
         // `weight_input` refuses a parameter whose declared uses are not exactly one
         // (src/models/common/weights.cpp:15-18) — a shared parameter is only usable through a
-        // `WeightUseId`, which names the mathematical use as well as the object. The census is
-        // that test, parameter by parameter, against the definition's own declared-use table
-        // (`ModelDefinition::uses`) and the shard's, printed before the construction: the
-        // executor's stop is then a row of a table, not only an exception.
+        // `WeightUseId`, which names the mathematical use as well as the object, because the use
+        // is what carries the operation's activation policy and calibration. The census is that
+        // rule, parameter by parameter, against the definition's own declared-use table
+        // (`ModelDefinition::uses`) and the shard's, printed before the construction: a binding
+        // that stops is then a row of a table, not only an exception, and a binding that starts
+        // silently dropping a declared use is a RED here rather than a policy widening later.
+        std::int32_t census_reds = 0;
         {
-            std::vector<std::pair<std::string, WeightId>> projections;
+            // `gathered` marks a parameter the round reads as a TABLE - a row gather inside a
+            // DSpine kernel, an embedding lookup, a norm vector - which the artifact therefore
+            // declares no mathematical use for. Such a parameter is not in the rule's domain: it
+            // is reached as the bytes of its object, not as a `WeightInput`. Every other row is a
+            // matmul operand, and the executor reaches it through `Prepare::linear`, so the rule
+            // applies to it and a row that fails the rule is a RED of this probe.
+            struct Census {
+                std::string label;
+                WeightId id;
+                bool gathered = false;
+                bool shared_head = false;
+            };
+            std::vector<Census> projections;
+            std::int32_t linear_bound = 0, table_rows = 0;
             try {
                 // The definition's own id table for the drafter: the same
                 // `dspine::bind_weights` result `execution::Parameters` binds through, with
@@ -1157,11 +1173,11 @@ int main(const int argc, char** argv) {
                 projections.emplace_back("bridge/gate", ids.bridge.gate);
                 projections.emplace_back("bridge/predecessor_gate", ids.bridge.predecessor_gate);
                 projections.emplace_back("bridge/prev", ids.bridge.prev);
-                projections.emplace_back("bridge/tg", ids.bridge.tg);
-                projections.emplace_back("bridge/tsv", ids.bridge.tsv);
-                projections.emplace_back("bridge/codebook", ids.bridge.codebook);
-                projections.emplace_back("token_embedding", ids.token_embedding);
-                projections.emplace_back("output_head", ids.output_head);
+                projections.emplace_back("bridge/tg", ids.bridge.tg, true);
+                projections.emplace_back("bridge/tsv", ids.bridge.tsv, true);
+                projections.emplace_back("bridge/codebook", ids.bridge.codebook, true);
+                projections.emplace_back("token_embedding", ids.token_embedding, true);
+                projections.emplace_back("output_head", ids.output_head, false, true);
             } catch (const std::exception& failure) {
                 std::printf("census: the drafter's id table is not bindable: %s\n",
                             failure.what());
@@ -1173,23 +1189,66 @@ int main(const int argc, char** argv) {
                         "header\n");
             std::printf("%-44s %12s %10s %6s %9s %8s  %s\n",
                         "parameter", "rows", "columns", "parts", "declared", "carried",
-                        "linear(WeightId) needs one use");
-            for (const auto& [label, id] : projections) {
+                        "the use the executor binds it by (weights.cpp:15 needs exactly one)");
+            for (const auto& row : projections) {
+                const auto& id   = row.id;
                 const auto& view = model->weight(id).view;
                 const auto  rank = view.shape.size();
                 const auto  rows = rank == 0 ? std::size_t(0) : std::size_t(view.shape[rank - 2]);
                 const auto  cols = rank == 0 ? std::size_t(0) : std::size_t(view.shape[rank - 1]);
+                const auto  carried = model->weight(id).uses.size();
+                std::string verdict;
+                if (row.gathered) {
+                    verdict = carried == 0
+                                  ? "table: no use is declared for it, and none is needed"
+                                  : "table that unexpectedly carries a use";
+                    ++table_rows;
+                    census_reds += carried != 0;
+                } else if (row.shared_head) {
+                    // The one parameter of this drafter that is genuinely SHARED by several
+                    // arms: four declared uses, so the id form is refused by design and the
+                    // round must name the one it multiplies under.
+                    const auto& uses = definition->uses(id);
+                    const auto  found = std::find_if(
+                        uses.begin(), uses.end(), [](const auto& use) {
+                            return use.input == "dspine/final_hidden";
+                        });
+                    verdict =
+                        found == uses.end()
+                            ? "REFUSED: the manifest declares no dspine use of the head"
+                            : "by WeightUseId @" + found->input + " (policy "
+                                  + (found->policy == ops::LinearPolicy::AllowA8
+                                         ? "AllowA8"
+                                         : found->policy == ops::LinearPolicy::AllowA4
+                                               ? "AllowA4"
+                                               : "A16Only")
+                                  + "), " + std::to_string(carried) + " uses declared";
+                    census_reds +=
+                        found == uses.end() || carried != uses.size() || carried < 2;
+                    ++linear_bound;
+                } else if (carried == 1) {
+                    verdict = "by its one declared use @" + model->weight(id).uses[0].input;
+                    ++linear_bound;
+                } else {
+                    verdict = "REFUSED: the parameter carries no single declared use, so "
+                              "linear(WeightId) cannot bind it";
+                    ++census_reds;
+                }
                 std::printf("%-44s %12zu %10zu %6zu %9zu %8zu  %s\n",
                             model->weight(id).name.c_str(),
                             rows,
                             cols,
                             view.parts.size(),
                             definition->uses(id).size(),
-                            model->weight(id).uses.size(),
-                            model->weight(id).uses.size() == 1
-                                ? "ok"
-                                : "REFUSED: the parameter carries no single declared use");
+                            carried,
+                            verdict.c_str());
             }
+            std::printf("census: %zu drafter parameters, %d of them linear operands that bind, "
+                        "%d read as tables, %d RED\n",
+                        projections.size(),
+                        linear_bound,
+                        table_rows,
+                        census_reds);
             std::fflush(stdout);
         }
         // The construction is the executor's own step, and on this artifact it is where the
@@ -1308,7 +1367,9 @@ int main(const int argc, char** argv) {
             rows.push_back({label, std::move(left), std::move(right)});
         };
         pair("tower token embedding", spec.embedding, parameters.dspine->token_embedding);
-        pair("tower output head", spec.head, parameters.text.output_head.weight);
+        // The head: the specification binds the tower's object directly, the executor binds the
+        // head's `dspine/final_hidden` USE of the same object. Same bytes, two declared uses.
+        pair("tower output head", spec.head, parameters.dspine->output_head.weight);
         pair("dspine feature_projection", spec.feature_projection,
              parameters.dspine->feature_projection.weight);
         pair("dspine bridge codebook", spec.codebook, parameters.dspine->bridge.codebook);
@@ -1427,7 +1488,7 @@ int main(const int argc, char** argv) {
             peak_walk = std::max(peak_walk, std::int32_t(exec_arena.peak_used() >> 20));
             exec_arena.reset_peak();
             const execution::DspineTailView tail_view{
-                parameters.text.output_head.weight, parameters.dspine->final_norm,
+                parameters.dspine->output_head.weight, parameters.dspine->final_norm,
                 parameters.dspine->gate_bias, parameters.dspine->tg, parameters.dspine->tsv, g.r};
             const execution::DspineTailInputs tail_inputs{
                 exec_round.stash, exec_round.rms, exec_round.message, exec_round.normed,
@@ -1580,6 +1641,9 @@ int main(const int argc, char** argv) {
                     "through the tail of a %zu B (%.1f MiB) arena sized by "
                     "dspine_round_workspace_bytes\n",
                     peak_walk, peak_tail, arena_bytes, arena_bytes / (1024.0 * 1024.0));
+        reds += census_reds;
+        std::printf("binding: the drafter's binding census is %s\n",
+                    census_reds == 0 ? "green" : "RED");
         std::printf("binding: %d of %d weight pairs and %d of %d parameter tensors are the same "
                     "device range\n",
                     bindings.rows - bindings.parted, bindings.rows,
