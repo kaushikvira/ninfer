@@ -257,6 +257,13 @@ struct Probe {
     std::vector<std::unique_ptr<DeviceBuffer>> storage;
 };
 
+// The probe built by the running case. The device boundary helpers are free functions, so they
+// need the live probe to reach its buffers; one process runs one probe (RUN_SERIAL).
+namespace {
+Probe* owner = nullptr;
+Device work_device;
+}  // namespace
+
 // The buffer that owns a device pointer, so a copy goes through the transfer boundary the
 // engine's own buffers provide (they name their device, order the stream, and settle the copy).
 DeviceBuffer* owning_buffer(void* pointer) {
