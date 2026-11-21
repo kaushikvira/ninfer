@@ -729,6 +729,30 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   merged tree, then the CPU suite; the agent's own suite counts were from a different
   preset and are NOT comparable to the 82/9/113 baseline).
 
+- **D-2026-11-21-38** — **POST-MERGE GATE: GREEN, and the gate is now mechanical.**
+  `mwqegyzi-2d8b` on `b689e4e0`: reconfigure + build **1782 edges, exit 0, 0 FAILED**;
+  a forced delete-and-rebuild of all **7 dspine test targets** (1003 edges) proves
+  `test_dspine_forward_real.cpp` **compiles and links** — the D-36 hole is closed by
+  evidence, not by "ninja said up to date" (the binary predated the build, which is
+  exactly how the hole hid). CPU suite **83 P / 8 F / 82 S of 173**, **zero failures
+  outside the known set**, and a **registration sweep** (150 names in
+  `tests/**/tests.cmake` vs 208 in ctest) found **0 registered-but-unknown** — the
+  c7d09a66 failure mode is now asserted, not hoped for.
+  `⚠` **The verifier found its own artifact and said so**: a 9th failure
+  (`ninfer_moe_cpu_nvfp4_fma_test`, `libninfer_cpu_executor.so: cannot open`) was
+  caused by **its own `ninja -t clean` racing the live ctest run** — the test passes
+  standalone. **Rule: build and ctest run SERIALLY on the same build dir; never clean
+  while a suite is executing.** A racing clean fabricates failures exactly like a
+  missing registration fabricates a pass.
+  `⚠` **Merge gate — now the mechanical form** (D-36 made concrete): (1) `cmake --preset
+  … -S . -B <dir>` (reconfigure, so new tests enter the graph); (2) build; (3) **build
+  again and require `ninja: no work to do`** — the second invocation is what catches
+  "target never entered the graph"; (4) registration sweep `registered ⊆ ctest -N`;
+  (5) suite at the known baseline. **Optional debt done** (`ea8bb26f`): the `.cu`
+  `expert_cache` test carried no `gpu` label and no CPU-only path, so every CPU-only
+  run reported a phantom red — now labelled, **baseline 8 → 7** (the remaining 7 are
+  all missing-python-deps oracle tests: `jinja2` etc.).
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
