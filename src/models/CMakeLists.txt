@@ -7,6 +7,8 @@ add_library(ninfer_model_loading STATIC
   common/bindings.cpp
   common/dflash/config.cpp
   common/dflash/weights.cpp
+  common/dspine/config.cpp
+  common/dspine/weights.cpp
   common/parallel.cpp
   common/parallel_weights.cpp
   common/vision/resources.cpp

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "models/common/dflash/config.h"
+#include "models/common/dspine/config.h"
 #include "models/common/qwen/vision/parameters.h"
 #include "models/load_options.h"
 #include "models/registry.h"
@@ -93,6 +94,7 @@ struct Config {
     std::optional<qwen::VisionConfig> vision;
     bool mtp = false;
     std::optional<dflash::Config> draft;
+    std::optional<dspine::Config> dspine;
 };
 
 [[nodiscard]] ModelSamplingDefaults default_sampling(Architecture architecture);

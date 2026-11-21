@@ -5,6 +5,7 @@
 #include "core/weight_bank.h"
 #include "models/common/weights.h"
 #include "models/common/dflash/weights.h"
+#include "models/common/dspine/weights.h"
 #include "ninfer/ops/linear.h"
 
 #include <cstddef>
@@ -67,6 +68,7 @@ struct ModelWeights {
     std::optional<qwen::VisionWeights> vision;
     std::optional<MtpWeights> mtp;
     std::optional<dflash::Weights> draft;
+    std::optional<dspine::Weights> dspine;
     std::optional<ProposalWeights> proposal;
 };
 
