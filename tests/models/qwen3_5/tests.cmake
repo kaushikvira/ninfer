@@ -173,3 +173,16 @@ set_tests_properties(${ninfer_qwen3_5_real_tests} PROPERTIES
 set_tests_properties(
   ninfer_qwen3_5_state_image_test
   PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
+
+# The DSpine proposal-tail COST curve (D-43's perf question, the criterion ⑤ denominator). It is a
+# benchmark, and it is registered as a test because the probe that carries the tail's cost arms has
+# to initialise CUDA the way the forward probe does: the same binary in the bench/ closure stops at
+# the device bind with cudaErrorMemoryAllocation (and under lazy module loading it stops silently),
+# while this closure reaches the device in 0.2 s. Same sources, same libraries as the forward
+# probe, plus the execution tail it costs. Opt-in by NINFER_TEST_ARTIFACT + NINFER_TEST_DEVICE
+# (D-29), skips exit 77, and it is RUN_SERIAL because it is a timing run.
+ninfer_add_test(ninfer_qwen3_5_dspine_tail_cost_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_tail_cost.cpp"
+  LIBRARIES ninfer_model_loading ninfer_ops)
+set_tests_properties(ninfer_qwen3_5_dspine_tail_cost_test PROPERTIES
+  SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 3600)
