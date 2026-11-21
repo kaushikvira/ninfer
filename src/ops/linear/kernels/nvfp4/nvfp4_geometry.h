@@ -30,20 +30,26 @@ using Nvfp4N14336K5120 = Nvfp4Geometry<14336, 5120>;
 using Nvfp4N16384K5120 = Nvfp4Geometry<16384, 5120>;
 using Nvfp4N28672K5120 = Nvfp4Geometry<28672, 5120>;
 using Nvfp4N34816K5120 = Nvfp4Geometry<34816, 5120>;
+using Nvfp4N5120K4096  = Nvfp4Geometry<5120, 4096>;
 using Nvfp4N5120K6144  = Nvfp4Geometry<5120, 6144>;
 using Nvfp4N5120K14336 = Nvfp4Geometry<5120, 14336>;
 using Nvfp4N5120K17408 = Nvfp4Geometry<5120, 17408>;
+using Nvfp4N5120K25600 = Nvfp4Geometry<5120, 25600>;
+using Nvfp4N6144K5120  = Nvfp4Geometry<6144, 5120>;
 
+using Nvfp4Activation4096Geometry  = Nvfp4ActivationGeometry<4096>;
 using Nvfp4Activation5120Geometry  = Nvfp4ActivationGeometry<5120>;
 using Nvfp4Activation6144Geometry  = Nvfp4ActivationGeometry<6144>;
 using Nvfp4Activation14336Geometry = Nvfp4ActivationGeometry<14336>;
 using Nvfp4Activation17408Geometry = Nvfp4ActivationGeometry<17408>;
+using Nvfp4Activation25600Geometry = Nvfp4ActivationGeometry<25600>;
 
 enum class Nvfp4GeometryId : std::uint8_t {
     N14336K5120,
     N16384K5120,
     N28672K5120,
     N34816K5120,
+    N5120K4096,
     N5120K6144,
     N5120K14336,
     N5120K17408,
@@ -65,6 +71,9 @@ inline Nvfp4GeometryId resolve_nvfp4_geometry(std::int32_t output_rows, std::int
     if (output_rows == Nvfp4N34816K5120::kOutputRows &&
         input_rows == Nvfp4N34816K5120::kInputRows) {
         return Nvfp4GeometryId::N34816K5120;
+    }
+    if (output_rows == Nvfp4N5120K4096::kOutputRows && input_rows == Nvfp4N5120K4096::kInputRows) {
+        return Nvfp4GeometryId::N5120K4096;
     }
     if (output_rows == Nvfp4N5120K6144::kOutputRows && input_rows == Nvfp4N5120K6144::kInputRows) {
         return Nvfp4GeometryId::N5120K6144;

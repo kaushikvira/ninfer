@@ -90,11 +90,22 @@ void launch_nvfp4_a4_quantize(const Tensor& x, const Weight& weight, Nvfp4A4Work
                                                             programmatic);
         return;
 #if NINFER_TARGET_RTX5090
+    // The DSpine draft layer's attention output columns (32 x 128). Spark instantiates this K for
+    // its own tower; on the 5090 it is reached through the draft tower only.
+    case Nvfp4Activation4096Geometry::kInputRows:
+        launch_quantize_exact<Nvfp4Activation4096Geometry>(x, weight, workspace, layout, stream,
+                                                            programmatic);
+        return;
     case Nvfp4Activation14336Geometry::kInputRows:
         launch_quantize_exact<Nvfp4Activation14336Geometry>(x, weight, workspace, layout, stream,
                                                             programmatic);
         return;
 #endif
+    // The DSpine draft layer's tap feature projection (5 taps x 5120 columns).
+    case Nvfp4Activation25600Geometry::kInputRows:
+        launch_quantize_exact<Nvfp4Activation25600Geometry>(x, weight, workspace, layout, stream,
+                                                             programmatic);
+        return;
     default:
         throw std::invalid_argument("nvfp4 A4 quantize: unsupported K");
     }
