@@ -71,6 +71,9 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **1.31568 GiB** (= D-14 −2.5 %) / 2.16674 GiB BF16 twin. **Sizing rule: count
   objects, not binding names** (D-30's 2.112 GiB figure was a name-sum overcount).
   **P3 criterion 3 = half green (load half); the forward is the open half.**
+- **`a5000-11` is UP** (restored 12:50 UTC at MemAvailable 84 GiB — the guard needs
+  66 + 10, so the window is thin and it was taken the moment it opened). All four
+  autostart lanes up.
 - **`a5000-11` DOWN IS INTENTIONAL while a device task is running** (not drift, not
   a blocked restore): dgemma holds 24 GiB of GPU 1's VRAM, and the DSpine device
   work needs ~25 GiB. **Current holder: `mwqbcurg-fa28`** (head-format bridge +
