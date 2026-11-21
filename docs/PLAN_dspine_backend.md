@@ -551,9 +551,9 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **names**, reading each packed object **seven times**; the sizing number is the
   **per-object** one. **Sizing rule from now on: count objects, not binding names**
   (verify with `dspine_inventory`/the per-object probe, not the name sum).
-  Merged `4fbaba55`. **P3 gate criterion 3 is now HALF green**: the *load* half
-  (bind + footprint from the real 1.3157 GiB artifact) is done; **the forward itself
-  is the open half**.
+  Merged `4fbaba55`. **P3 gate criterion 3 = load half green** (bind + footprint from
+  the real 1.3157 GiB artifact); **the forward is the open half, in flight
+  `mwq6hti0-4872`** (dgemma down, GPU 1 25.5 GiB, torch reference, worktree on disk).
 
 - **D-2026-11-21-32** — `⚠` **`/tmp` IS tmpfs ON TURIN (RAM-backed) — worktrees and
   build dirs there were eating the fleet's RAM floor.** The watchdog caught "the
@@ -568,6 +568,24 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   disk + GitHub rather than in RAM-backed scratch. `feat/dspine-p2a` (the Python
   forward harness, `92bcb397`) was pushed to origin before its worktree was
   removed.
+
+- **D-2026-11-21-33** — **LOAD PATH FULLY CLOSED; the FORWARD is the only blocker left
+  before the accept gate.** Confirmed `mw4i33r-83f5`'s work is **byte-identical to
+  the merged `4fbaba55`** (`git diff` = 0 lines in src+tests). Two facts added:
+  (a) **"phantom fifth blocker"**: the probe had bound the bridge tables in the
+  *same* `Bindings` it handed to `bind_weights`; the loader refuses a parameter
+  bound twice (`duplicate model parameter declaration dspine/bridge/codebook`), so
+  the loader needs **two `Bindings`, one stage each** — the D-28 lesson again (each
+  fix reveals the next one downstream, so walk the path **once, in one place**).
+  (b) Suite tallies with the drafter bound: full tree compiles 1565/1565; ctest
+  `-LE gpu;real;bench` = 186/204, the 18 = 9 python-oracle dep failures + 9 device
+  tests that **pass on rerun** (they had hit `cudaMalloc: insufficient Device
+  memory` with `a5000-11` at 100 % util — a **contention artifact, not a
+  regression**; note for any future "device tests fail" reading).
+  **Forward launched** `mwq6hti0-4872` with dgemma down (GPU 1 = 25.5 GiB), oracle =
+  Tencent's **torch** `sglang_dspine/models/dspine.py` (CPU torch at
+  `/home/kv/venvs/qquant/bin/python`), worktree on **disk** `/home/kv/work/wt-dspine-fwd`
+  (D-32).
 
 ## OBJECTIVE
 
