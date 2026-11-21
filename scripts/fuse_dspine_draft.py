@@ -34,7 +34,6 @@ from tools.artifact.schema import parse_directory  # noqa: E402
 ALIGN = PAYLOAD_ALIGNMENT
 CHUNK = 64 * 1024 * 1024
 PREFIX = "dspine/"
-HEAD_FORMAT = "fp8_e4m3fn_row_bf16"
 
 
 def align(value: int, amount: int = ALIGN) -> int:
@@ -69,8 +68,6 @@ def head_record(target: dict, payload_start: int, path: str) -> tuple[str, dict]
     if set(binding) != {"object"}:
         raise SystemExit("text/output_head must be a single-object binding")
     obj = {item["id"]: item for item in target["objects"]}[binding["object"]]
-    if obj["format"] != HEAD_FORMAT:
-        raise SystemExit(f"text/output_head: unexpected format {obj['format']!r}")
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
         handle.seek(payload_start + obj["offset"])
@@ -158,17 +155,29 @@ def main(argv: list[str] | None = None) -> None:
     if not all(obj["id"].startswith(PREFIX) for obj in draft["objects"]):
         raise SystemExit("draft suffix contains non-dspine objects")
     head_sha256, head_obj = head_record(target, target_start, target_path)
-    recorded = (
+    tables = (
         ((draft.get("provenance") or {}).get("dspine") or {}).get("serial_tables")
         or {}
-    ).get("head_sha256")
+    )
+    recorded = tables.get("head_sha256")
     if recorded is None and not args.allow_unknown_tower:
         raise SystemExit(
             "draft suffix records no head checksum; pass --allow-unknown-tower"
         )
     check_compat(target, draft, head_sha256)
+    recorded_format = tables.get("head_format")
+    if (
+        recorded_format is not None
+        and recorded_format != head_obj["format"]
+        and recorded == head_sha256
+    ):
+        raise SystemExit(
+            "draft suffix records head format "
+            f"{recorded_format!r} but this target stores {head_obj['format']!r}"
+        )
     print(
-        f"target head {head_obj['id']} sha256 {head_sha256[:16]}… "
+        f"target head {head_obj['id']} {head_obj['format']}/{head_obj['layout']} "
+        f"sha256 {head_sha256[:16]}… "
         f"{'matches the draft suffix' if recorded == head_sha256 else '(unchecked)'}",
         flush=True,
     )
