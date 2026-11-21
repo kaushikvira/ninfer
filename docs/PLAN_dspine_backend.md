@@ -1065,6 +1065,23 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   in this build (all its engine tests skip without an artifact+device), which is D-21(b)
   and is the A/B's denominator.
 
+- **D-2026-11-21-47** — `⚠` **A REPRODUCIBLE STOP AFTER "MANIFEST PARSE ENDS" — and D-45's
+  link-closure theory is WRONG.** The perf task (`mwqqkpjq-dd5e`) died pre-measurement:
+  its harness prints `manifest parse begins` / `manifest parse ends` and then **hangs**
+  (0 % GPU, one core pegged) — **the same place probe `#70` stops**. But the **working**
+  forward probe `#71` opens the **same artifact**, links the **same** libraries
+  (`ninfer_model_loading ninfer_ops`), and loads 55 objects / 3.83186 GiB in **0.29 s**.
+  ⇒ **the "`#70`'s unique link closure (`+model_execution`)" explanation does not
+  discriminate**, so D-45's localization is **superseded**: the common factor is a
+  **freshly written device-bind setup**, not the link set. **Do not chase it as a rabbit
+  hole** — the perf question does not need it: the second attempt (`mwquvyl0-c812`) is
+  told to **copy `#71`'s device path verbatim** and add timing around the tail only, and
+  to stop-and-report if the hang recurs with a verbatim copy.
+  `⚠` Cost of the failed attempt, recorded for cadence purposes: **12 log files / ~15 min
+  of a subagent** spent chasing a harness stop instead of the number, and nothing was
+  committed until I committed its orphan (`96b5475d`). **Fifth orphan saved tonight** —
+  the "commit at the first working measurement" instruction is now explicit in the brief.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
