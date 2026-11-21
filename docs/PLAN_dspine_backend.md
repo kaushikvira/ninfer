@@ -82,6 +82,11 @@ pre-output (1 core pegged, RSS 194.6 MiB, `minflt` 12906, K-independent, 0 % GPU
 `#71`/`#72` run the identical reader/device sequence on the same artifact in 0.17–0.29 s —
 so it is that target's link closure, not the data path.
 
+**The perf question is settled (D-48): the K=15 tail costs 1.607 ms/round, scales as
+K^0.065 (not K^2), and the break-even is only +0.25 accepted drafts/round (+8.4 % additive
+bound, +1.0 % for the window delta). Prod runs a 19.137 ms round, so the wide window costs
+~1 % of tok/s. Criterion ⑤ is now a win-shaped question.**
+
 **The plan to a number, in dependency order:**
 1. **DSpine draft-context append + the 5-layer walk in the executor** (both probe-only
    today). The seam now stops at a *named throw* instead of a nullopt read — that throw is
@@ -1081,6 +1086,37 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   of a subagent** spent chasing a harness stop instead of the number, and nothing was
   committed until I committed its orphan (`96b5475d`). **Fifth orphan saved tonight** —
   the "commit at the first working measurement" instruction is now explicit in the brief.
+
+- **D-2026-11-21-48** — **PERF KILL-SWITCH PASSED: AFFORDABLE. `⚠` D-43's K² COST FEAR IS
+  REFUTED (by ~30×) — measured, and the code explains why.** Merged `66359e27`.
+  **Whole-round tail cost on the real head/tg/tsv (CUDA-event, N=32 warmed, 4 repeat runs
+  ≤0.9 % spread): K=1 1.323 · K=3 1.356 · K=7 1.412 · K=15 1.607 ms/round.** Measured
+  **K-scaling exponent 0.065** — where `K¹` reads 1.000 and **`K²` reads 2.000**;
+  `cost(15)/cost(1) = 1.21` where the K² reading predicts **225**.
+  **Why D-43 was wrong, in source**: `serial_scores_kernel` is templated on **`kTopK=16`**
+  (`kernels.cu:202`) ⇒ the score table is a **fixed 16×16 grid per CTA**, launched with
+  **`drafts*batch` CTAs** (`kernels.cu:605`) ⇒ **K enters as CTA count, linear at worst**.
+  The vocab-wide term is **`linear_topk`**, which streams the **1.27 GiB head ONCE** and
+  amortises all K proposal columns: **1.327 ms = 83 %** of the K=15 round at **~1.0 TB/s
+  (63 % of card peak)**. **K² was never in the code — I read the table's `16×16` as a
+  function of K.** Breakdown at K=15: `linear_topk` 1.327 · `serial_scores` 0.165 ·
+  `serial_tail` 0.104 (**the only superlinear term**, exponent 0.57) · bridge 0.010.
+  **BREAK-EVEN, from measured cost against prod's own metrics** (271,048 rounds, 803,523
+  accepted = **2.9645/round**, `decode_step` **19.137 ms**): **additive bound ⇒ accepted
+  must reach 3.250/round (+0.252, +8.4 %)**; the **K15-vs-K7 window delta costs only
+  +0.031 (+1.0 %)**. Whole tail at unchanged acceptance = **192.7 tok/s vs prod's 208.9
+  (92.3 %)**. Prod's per-position decay extrapolated over 15 positions gives **~3.8–4.3
+  accepted ⇒ ~4× the price**. **So criterion ⑤ is a WIN-shaped question, not a
+  loss-shaped one.**
+  `⚠` **Limits, stated**: measured on **GPU 1 (PRO 5000) with basalt live** ⇒ absolutes are
+  contended-card numbers; the head term is **bandwidth-bound**, so the exponent, the op
+  split and the **%-of-round break-even are card-robust** while the **absolute ms transfer
+  to the 5090 is medium confidence**. Excluded from the curve: the **5 draft layers**, the
+  **(K+1) target verify** (the other K-dependent term), the **accept op**, and **batch>1**.
+  `⚠` **D-45's `#70` "link closure" lead is DEAD**: the retry used a **verbatim copy** of
+  `#71`'s device setup and **did not hang** ⇒ localize `#70` to **its own setup code**,
+  not the library set. The working pattern for a device probe in this family is now
+  `test_dspine_tail_cost.cpp`.
 
 ## OBJECTIVE
 
