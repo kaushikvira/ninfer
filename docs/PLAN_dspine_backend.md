@@ -560,8 +560,11 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **3.83186 GiB** incl. the reused tower head+embedding, 0.29 s h2d, zero-copy) —
   **the forward half is BLOCKED on nvfp4 linear geometry** (D-34): feature
   projection `[5120,25600]`, split q/k/v `[6144,5120]`, attention out `[5120,4096]`
-  are refused at a **host-side shape lookup before any launch**. Instantiation in
-  flight `mwq9e7xr-8932`. **`⚠` P3 is NOT reachable tonight** (D-34).
+  were refused at a **host-side shape lookup before any launch** — **CLEARED by shape
+  instantiation** `4ddee03a` (D-35): 6 REFUSED → **16/16 COMPILED**, split tiling =
+  the drafter's own 4096/1024/1024. Remaining forward gaps: **head-format bridge**
+  (`q8_g32_fp16` vs the op's `FP8_E4M3FN_ROW_BF16`) + **no score-table producer**
+  (in flight `mwqbcurg-fa28`). **`⚠` P3 is NOT reachable tonight** (D-34).
 
 - **D-2026-11-21-32** — `⚠` **`/tmp` IS tmpfs ON TURIN (RAM-backed) — worktrees and
   build dirs there were eating the fleet's RAM floor.** The watchdog caught "the
@@ -631,6 +634,33 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **`⚠` CONSEQUENCE — no P3 window tonight.** Gate = **2.5/5**, and criteria 3–5 all
   sit behind these gaps. What survives is real: load path closed, tail policy
   parity closed on device, NVFP4 gather closed.
+
+- **D-2026-11-21-35** — **SHAPE GATE CLEARED BY INSTANTIATION — no re-quantization
+  needed.** `0e398304`/`18ee4859`/`c61c3956`/`8a661cef` (merged `4ddee03a`): all three
+  geometries exist in **NVFP4** by *shape instantiation only* — feature projection
+  `N5120K25600`, draft attention out `N5120K4096`, packed Q/K/V split parent
+  `6144×5120` (`kSplitRows<4096,1024,1024>`). The split tiling is the drafter
+  release's own config (**32 heads × 128 = 4096 Q, 8 kv × 128 = 1024 K, 1024 V**) and
+  is *the same tiling the Q8 split of this parent already registers* ⇒ the fork's Q8
+  tables implied a representation change that **turned out to be unnecessary**.
+  Measured: forward probe on the real drafter (GPU 1) **6 REFUSED → 16/16 COMPILED**;
+  host gate **25 lookups / 0 refused** (including prod tower + DFlash2 drafter
+  geometries as the cheap regression proof); device numerics **78/78**; build
+  1756/1756; ctest 198/207 with the failure list **byte-identical** before/after.
+  `⚠` **SECOND SHAPE GATE (new, general lesson)**: the **A4 activation quantizer has
+  its own K whitelist** (`kernels/nvfp4/nvfp4_a4.cu:73`) — a *second* gate beyond the
+  shape table; without `Nvfp4ActivationGeometry<4096>/<25600>` every A4 call on the
+  new shapes threw `nvfp4 A4 quantize: unsupported K`. **Any future shape work must
+  check both whitelists.**
+  `⚠` **NEW DEFECT (found, bounded, not buried)**: the **A4 contraction at K=25600 is
+  34 % off the fp64 oracle from T ≥ 1024** (deterministic, identical with and without
+  the TMA branch) where K=6144/17408/4096 are clean at 1024/1025. `uses_a4` bounded to
+  **T ∈ [8,1023]**, so prefill above 1023 takes the **A16 route** (clean at 1024).
+  **Correctness-safe; a prefill-perf question for P2**, recorded with case ids.
+  Next on the forward path (both measured gaps, in flight `mwqbcurg-fa28`): (i) the
+  head-format bridge (**`serial_scores` wants `FP8_E4M3FN_ROW_BF16`, our tower head is
+  `q8_g32_fp16`** — dequant-on-gather, NOT a 1.3–2.5 GiB copy that would break D-14's
+  sizing) and (ii) the **missing score-table producer** for the sampled tail.
 
 ## OBJECTIVE
 
