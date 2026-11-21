@@ -32,12 +32,14 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -91,7 +93,9 @@ struct Dev {
 
 // A device buffer filled from a binary file. `expect` is the byte count the op geometry
 // requires; a size mismatch is a hard error (a truncated vector would silently pass).
-void* upload(Dev& dev, const std::string& path, std::size_t expect) {
+// Reads a file and checks it has exactly `expect` bytes (a truncated vector would
+// otherwise let a partial table silently pass).
+std::vector<char> read_file(const std::string& path, std::size_t expect) {
     std::ifstream in(path, std::ios::binary);
     if (!in) { die("cannot open input " + path); }
     std::vector<char> host(static_cast<std::size_t>(std::filesystem::file_size(path)));
@@ -101,11 +105,21 @@ void* upload(Dev& dev, const std::string& path, std::size_t expect) {
         die("input " + path + " is " + std::to_string(host.size()) + " bytes, geometry wants " +
             std::to_string(expect));
     }
+    return host;
+}
+
+// A device buffer filled from bytes read by read_file.
+void* upload_bytes(Dev& dev, std::span<const char> host) {
     void* device = nullptr;
-    cuda_ok(cudaMalloc(&device, expect == 0 ? 1 : expect), "cudaMalloc");
-    cuda_ok(cudaMemcpy(device, host.data(), expect, cudaMemcpyHostToDevice), "copyin");
+    const std::size_t bytes = host.size();
+    cuda_ok(cudaMalloc(&device, bytes == 0 ? 1 : bytes), "cudaMalloc");
+    cuda_ok(cudaMemcpy(device, host.data(), bytes, cudaMemcpyHostToDevice), "copyin");
     dev.pointers.push_back(device);
     return device;
+}
+
+void* upload(Dev& dev, const std::string& path, std::size_t expect) {
+    return upload_bytes(dev, read_file(path, expect));
 }
 
 void download(const std::string& dir, const std::string& name, const void* device,
@@ -236,18 +250,49 @@ struct Builder {
 
     // A gather table the op dequantizes on access: the packed E2M1 code plane plus the
     // swizzled E4M3 scale plane and the parent divisor (Weight::weight_scale).
+    // Built the way the artifact loader materializes one, because that is the shape the op
+    // itself gates on (ops/common/host/operands.cpp:validate_nvfp4_weight): one payload with
+    // the code plane at 0 and the swizzled scale plane at align_up(code_bytes, 256), planes
+    // inside it and non-overlapping, qhigh absent, and both scales finite and positive.
     Weight nvfp4_table(const std::string& key, std::int32_t n, std::int32_t k) {
         for (const auto& [name, codes, scales, divisor] : args.nvtables) {
             if (name != key) { continue; }
+            const std::size_t code_bytes = static_cast<std::size_t>(n) * (k / 2);
+            const std::size_t scale_bytes = scale_plane_bytes(n, k);
+            const std::size_t scale_offset = ((code_bytes + 255) / 256) * 256;
+            const std::size_t payload_bytes = scale_offset + scale_bytes + sizeof(float);
+
+            std::vector<char> host(payload_bytes, '\0');
+            const std::vector<char> code_plane = read_file(codes, code_bytes);
+            const std::vector<char> scale_plane = read_file(scales, scale_bytes);
+            std::copy(code_plane.begin(), code_plane.end(), host.begin());
+            std::copy(scale_plane.begin(), scale_plane.end(), host.begin() + scale_offset);
+            char* base = static_cast<char*>(upload_bytes(dev, host));
+
             Weight weight{};
             weight.device = Device::cuda(device);
             weight.qtype = QType::NVFP4;
             weight.layout = QuantLayout::BlockScaleK16M128x4;
+            weight.group_size = 16;
             weight.group = 16;
-            weight.qdata = upload(dev, codes, static_cast<std::size_t>(n) * (k / 2));
-            weight.scales = upload(dev, scales, scale_plane_bytes(n, k));
+            weight.ndim = 2;
+            weight.shape[0] = n;
+            weight.shape[1] = k;
+            weight.padded_shape[0] = n;
+            weight.padded_shape[1] = k;
+            weight.payload = base;
+            weight.payload_bytes = payload_bytes;
+            weight.qdata = base;
+            weight.scales = base + scale_offset;
+            weight.qhigh = nullptr;
+            weight.high_plane_bytes = 0;
             weight.scale_dtype = DType::FP8_E4M3FN;
+            if (!(divisor > 0.0F)) {
+                die("--nvtbl " + key + ": divisor parsed to " + std::to_string(divisor)
+                    + "; it must be a positive decimal (the matrix scalar)");
+            }
             weight.weight_scale = divisor;
+            weight.input_scale = 1.0F;  // the NVFP4 gate requires a positive input scale
             weight.n = n;
             weight.k = k;
             return weight;

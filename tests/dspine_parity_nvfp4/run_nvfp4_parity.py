@@ -77,7 +77,10 @@ def run_fixture(op, geo, eps, inputs, tables, nvfp4_tables, fp8, policy, workdir
         codes, scales = workdir / f"{name}_codes.bin", workdir / f"{name}_scales.bin"
         write_bin_c(codes, table.packed)
         write_bin_c(scales, table.scales)
-        command.append(f"--nvtbl={name}:{codes}:{scales}:{np.float32(table.divisor)!r}")
+        # repr(float32) is a plain shortest-round-trip decimal (e.g. '2688.0'), which the
+        # fixture reads back with strtof to the identical binary32 divisor.
+        command.append(
+            f"--nvtbl={name}:{codes}:{scales}:{float(np.float32(table.divisor))!r}")
     for name, (codes, scales) in fp8.items():
         code_path = workdir / f"{name}_fp8codes.bin"
         scale_path = workdir / f"{name}_fp8scales.bin"
@@ -104,8 +107,8 @@ def flatten(want: np.ndarray) -> np.ndarray:
 def score(rows, kind, op, case, output, want, got_path, band) -> dict:
     """Reference bits vs device bits, in storage ulps (bf16 uint16 / fp32 uint32 / int32)."""
     want_flat = flatten(want)
-    element = {np.uint16: np.uint16, np.int32: np.int32,
-               np.float32: np.uint32}[want.dtype]
+    element = {np.dtype(np.uint16): np.uint16, np.dtype(np.int32): np.int32,
+               np.dtype(np.float32): np.uint32}[want.dtype]
     got = np.fromfile(got_path, dtype=element)
     row = {"kind": kind, "op": op, "case": case, "output": output,
            "n": int(want_flat.size), "band": band}
@@ -135,7 +138,10 @@ def score(rows, kind, op, case, output, want, got_path, band) -> dict:
 
 def device_vs_device(rows, kind, op, case, left, right, dtype, name) -> dict:
     """(b) two device runs on the same vectors; only the table format differs."""
-    a, b = np.fromfile(left, dtype=dtype), np.fromfile(right, dtype=dtype)
+    element = {np.dtype(np.uint16): np.uint16, np.dtype(np.int32): np.int32,
+               np.dtype(np.float32): np.uint32}[np.dtype(dtype)]
+    dtype = np.dtype(dtype)
+    a, b = np.fromfile(left, dtype=element), np.fromfile(right, dtype=element)
     row = {"kind": kind, "op": op, "case": case, "output": name, "n": int(a.size), "band": 0}
     if a.size != b.size:
         row.update(verdict="SIZE")
