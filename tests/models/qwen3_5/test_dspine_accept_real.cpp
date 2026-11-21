@@ -26,6 +26,8 @@
 // NINFER_TEST_ARTIFACT  the V3-tailored DSpine artifact (skip, exit 77, when unset)
 // NINFER_TEST_DEVICE    the visible CUDA ordinal to run on; required, no default (D-29)
 // NINFER_TEST_ROUNDS    rounds to measure (default 12, floor 8)
+// NINFER_TEST_DRAFTS    narrow K below the drafter's block (the seam is K-independent; the
+//                       tail's score table costs K^2 head projections per round)
 //
 // Run it pinned to the free card: CUDA_VISIBLE_DEVICES=1 NINFER_TEST_DEVICE=0 ...
 
@@ -548,6 +550,9 @@ RoundResult run_round(Harness& probe, Round& round, MemoryArena& arena, const st
 int main(const int argc, char** argv) {
     (void)argc;
     (void)argv;
+    // A seam probe that is killed must not lose the rounds it already measured: the round rows
+    // are the result. (The forward probe's D-34 lesson, taken verbatim.)
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     const auto path = setting("NINFER_TEST_ARTIFACT");
     if (path.empty()) {
         std::printf("skip: NINFER_TEST_ARTIFACT is not set\n");
@@ -570,12 +575,18 @@ int main(const int argc, char** argv) {
     }
     const std::int32_t requested = std::stoi(setting("NINFER_TEST_ROUNDS", "12"));
     const std::int32_t rounds    = requested < 8 ? 8 : requested;
+    // K is the drafter's own block minus the anchor; NINFER_TEST_DRAFTS narrows it. At the full
+    // K the tail's score table is a K-by-K grid of head projections over the full vocabulary, so
+    // one round of a K=15 tail is thousands of 248320 x 5120 matvecs - the real cost of the tail
+    // at the production draft count, and the reason a seam probe on a shared card narrows K.
+    const std::int32_t requested_drafts = std::stoi(setting("NINFER_TEST_DRAFTS", "0"));
     try {
         Harness probe(path, device);
         world = &probe;
         probe.bind();
         probe.materialize();
-        const auto drafts = std::int32_t(dimension(probe.config.block_size) - 1);
+        auto drafts = std::int32_t(dimension(probe.config.block_size) - 1);
+        if (requested_drafts > 0) drafts = std::min(drafts, requested_drafts);
         std::printf("round: K=%d drafts, batch %d, a %d-wide block, %d-token domain\n", drafts,
                     kBatch, drafts + 1, kTokenDomain);
 
