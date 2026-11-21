@@ -240,6 +240,11 @@ CASES = [
     ("minp02_t07", 15, 1, 0.7, 20, 1.0, 0.2, [13], [4096]),
     ("lowtemp_t005", 15, 1, 0.05, 20, 1.0, 0.0, [14], [8192]),
     ("prod_batch2_drafts3", 3, 2, 0.9, 20, 1.0, 0.05, [21, 22], [300, 301]),
+    # K1 proper (D-24): T=1.0 AND top_k=20 == kSlots, i.e. no cut, top_p/min_p disabled, one
+    # fixed seed. Every filter is bypassed, so this is the row where only the sampled-tail
+    # arithmetic is under test; the other T=1.0 rows all carry a top-k cut (K2-shape).
+    # Appended last: the shared draw stream of the rows above is unchanged.
+    ("k1_proper_t10", 15, 1, 1.0, 20, 1.0, 0.0, [17], [16384]),
 ]
 
 

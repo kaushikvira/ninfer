@@ -83,6 +83,9 @@ std::vector<Case> cases() {
         CASE(prod_t09_minp005),  CASE(greedy_t0),      CASE(topk4_t10),
         CASE(topp08_t12),        CASE(minp02_t07),     CASE(lowtemp_t005),
         CASE(prod_batch2_drafts3),
+        // D-24's K1 tier proper: T=1.0 with no top-k cut, the row where only the tail arithmetic
+        // is under test.
+        CASE(k1_proper_t10),
     };
 }
 

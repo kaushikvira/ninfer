@@ -1,12 +1,23 @@
 #include "artifact/binder.h"
 #include "artifact/fixture.h"
 #include "artifact/formats.h"
+#include "artifact/materializer.h"
+#include "artifact/views.h"
+#include "core/weight_view.h"
 #include "models/common/bindings.h"
+#include "models/common/dspine/weights.h"
 #include "models/qwen3_5/load.h"
+#include "ops/common/host/operands.h"
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <iostream>
+#include <map>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -25,6 +36,23 @@ Json added_token(int id, const std::string& content) {
 // sliding-attention draft with a code bridge and TG/TSV tables.
 struct DspineFixture {
     Fixture file;
+
+    // Bridge geometry. The three vocabulary-indexed tables are [vocabulary, C],
+    // [vocabulary, R] and [vocabulary, 2R]; an NVFP4 declaration also needs N%128=0 and K%64=0,
+    // which kSized satisfies. kReference keeps the shipped BF16 table shape.
+    struct BridgeGeometry {
+        std::uint64_t vocabulary, code_size, rank;
+    };
+    static constexpr BridgeGeometry kReference{272, 16, 8};
+    static constexpr BridgeGeometry kSized{512, 64, 64};
+
+    BridgeGeometry bridge;
+    // What the artifact declares for dspine/bridge/codebook, /tg and /tsv.
+    QType table_format       = QType::BF16;
+    QuantLayout table_layout = QuantLayout::Contiguous;
+    // A single table declared apart from the rest: the mixed and unsupported declarations the
+    // binding must reject.
+    std::map<std::string, std::pair<QType, QuantLayout>> table_overrides;
 
     void tensor(const std::string& id, std::vector<std::uint64_t> shape, QType format = QType::BF16,
                 QuantLayout layout = QuantLayout::Contiguous) {
@@ -66,6 +94,18 @@ struct DspineFixture {
         if (!input.empty()) { use(name, input); }
     }
 
+    // A bridge table: the same object/binding shape as parameter(), in the representation the
+    // fixture declares (BF16 contiguous by default, block-scaled NVFP4 for the sized artifact).
+    void table(const std::string& name, std::vector<std::uint64_t> shape) {
+        const auto override = table_overrides.find(name);
+        const auto format =
+            override == table_overrides.end() ? table_format : override->second.first;
+        const auto layout =
+            override == table_overrides.end() ? table_layout : override->second.second;
+        tensor(name, shape, format, layout);
+        file.root["bindings"][name] = {{"object", name}};
+    }
+
     // Adds the full DSpine component (config + tensors + bindings) to the fixture.
     void add_dspine_component() {
         const auto h = 128;
@@ -76,9 +116,9 @@ struct DspineFixture {
         const auto q = heads * head_dim;
         const auto k = kv_heads * head_dim;
         const auto layers = 2;
-        const auto vocab = 272;
-        const auto code_size = 16;
-        const auto rank = 8;
+        const auto vocab = bridge.vocabulary;
+        const auto code_size = bridge.code_size;
+        const auto rank = bridge.rank;
         const auto taps = 1; // target_layer_ids size (target has 1 layer)
 
         file.root["components"]["dspine"] = {
@@ -126,8 +166,9 @@ struct DspineFixture {
             parameter(p + "mlp/gate_up", {2 * inter, h}, p + "mlp_input");
             parameter(p + "mlp/down", {h, inter}, p + "mlp_product");
         }
-        // Bridge + TG/TSV tables (BF16).
-        parameter("dspine/bridge/codebook", {vocab, code_size});
+        // Bridge + TG/TSV tables. codebook/tg/tsv carry the varied representation; the rest of
+        // the bridge stays BF16.
+        table("dspine/bridge/codebook", {vocab, code_size});
         parameter("dspine/bridge/early_read_weights", {layers - 1, code_size, h});
         parameter("dspine/bridge/read_weight", {code_size, h});
         parameter("dspine/bridge/feature_write_weights", {layers, h, rank});
@@ -135,13 +176,19 @@ struct DspineFixture {
         parameter("dspine/bridge/gate_bias", {rank});
         parameter("dspine/bridge/predecessor_gate", {rank, code_size});
         parameter("dspine/bridge/prev", {rank, code_size});
-        parameter("dspine/bridge/tg", {vocab, rank});
-        parameter("dspine/bridge/tsv", {vocab, 2 * rank});
+        table("dspine/bridge/tg", {vocab, rank});
+        table("dspine/bridge/tsv", {vocab, 2 * rank});
         // Update the declared payload size to include the DSpine tensors.
         file.root["files"][0]["payload_bytes"] = file.payload.size();
     }
 
-    DspineFixture() {
+    explicit DspineFixture(
+        BridgeGeometry bridge                                       = kReference,
+        QType table_format                                          = QType::BF16,
+        QuantLayout table_layout                                    = QuantLayout::Contiguous,
+        std::map<std::string, std::pair<QType, QuantLayout>> table_overrides = {})
+        : bridge(bridge), table_format(table_format), table_layout(table_layout),
+          table_overrides(std::move(table_overrides)) {
         file.payload.clear();
         file.root = {{"components",
                       {{"text",
@@ -149,7 +196,7 @@ struct DspineFixture {
                           {{"architectures", {"Qwen3_5ForCausalLM"}},
                            {"model_type", "qwen3_5_text"},
                            {"hidden_size", 128},
-                           {"vocab_size", 272},
+                           {"vocab_size", bridge.vocabulary},
                            {"num_hidden_layers", 1},
                            {"max_position_embeddings", 128},
                            {"tie_word_embeddings", true},
@@ -167,7 +214,7 @@ struct DspineFixture {
                      {"bindings", Json::object()},
                      {"uses", Json::array()},
                      {"metadata", {{"name", "dspine-load-test"}}}};
-        tensor("embedding-storage", {272, 128});
+        tensor("embedding-storage", {bridge.vocabulary, 128});
         file.root["bindings"]["text/token_embedding"] = {{"object", "embedding-storage"}};
         file.root["bindings"]["text/output_head"]     = {{"object", "embedding-storage"}};
         use("text/output_head", "text/final_hidden");
@@ -242,6 +289,139 @@ struct DspineFixture {
             Json::array({{{"path", nullptr}, {"payload_bytes", file.payload.size()}}});
     }
 };
+
+// A DSpine load whose codebook/tg/tsv carry `table_format`, bound with the loader's own config
+// and target geometry, then materialized to the Host: the native Weight the bridge ops receive.
+struct BridgeTables {
+    BridgeTables(
+        DspineFixture::BridgeGeometry geometry, QType table_format, QuantLayout layout,
+        std::map<std::string, std::pair<QType, QuantLayout>> overrides = {})
+        : fixture(geometry, table_format, layout, std::move(overrides)),
+          reader(written(fixture)) {}
+
+    // The Reader opens the file, so the fixture must be on disk before its member is built.
+    static const std::filesystem::path& written(DspineFixture& source) {
+        source.add_dspine_component();
+        source.file.write();
+        return source.file.entry;
+    }
+
+    // The Reader outlives every member below: Binder borrows it, Bindings borrows the Binder.
+    template <class Body> void with_binding(Body&& body) {
+        add_component();
+        artifact::Binder local_binder(reader);
+        Bindings local_bindings(local_binder);
+        const auto text = target();
+        const auto weights = dspine::bind_weights(local_bindings, *plan->config().dspine, text,
+                                                   "dspine");
+        body(local_bindings, weights);
+    }
+
+    dspine::TargetGeometry target() const {
+        const auto& text = plan->config().text;
+        return {text.hidden_size, text.vocab_size, text.num_hidden_layers};
+    }
+
+    void add_component() {
+        if (plan) { return; }
+        plan = q35::read_definition(reader, {.speculative = SpeculativeBackend::Dspine});
+        require(plan->weights().dspine.has_value(),
+                "the bridge-table artifact did not bind DSpine weights");
+    }
+
+    DspineFixture fixture;
+    artifact::Reader reader;
+    std::shared_ptr<const q35::ModelDefinition> plan;
+};
+
+// (a)+(c) The tables bind in the representation the artifact declares, and the Weight the ops
+// get reports it: NVFP4 passes the NVFP4 operand validation, BF16 stays the plain BF16 table.
+void bridge_tables_bind_as_declared(DspineFixture::BridgeGeometry geometry, QType table_format,
+                                    QuantLayout layout) {
+    BridgeTables tables(geometry, table_format, layout);
+    tables.with_binding([&](Bindings& bindings, const dspine::Weights& w) {
+        const std::array ids{w.bridge.codebook, w.bridge.tg, w.bridge.tsv};
+        std::vector<artifact::TensorRequest> requests;
+        for (const auto id : ids) {
+            const auto& binding = bindings.at(id).reference.binding;
+            require(binding.whole_object && binding.parts.size() == 1,
+                    "a bridge table must be one whole tensor object");
+            requests.push_back({artifact::whole_tensor(tables.reader, binding.parts[0].object),
+                                Device::cpu()});
+        }
+        const auto materialized =
+            artifact::materialize(tables.reader,
+                                  artifact::plan_materialization(
+                                      tables.reader,
+                                      std::span<const artifact::TensorRequest>{requests}));
+        for (const auto id : ids) {
+            const auto name = bindings.at(id).reference.name;
+            const auto view =
+                artifact::bind_view(bindings.at(id).reference, materialized, Device::cpu());
+            const auto weight = native_weight(view, 1.0F);
+            require(weight.qtype == table_format,
+                    (name + ": the bound Weight reports " +
+                     std::string(artifact::format_name(weight.qtype)) + ", not " +
+                     std::string(artifact::format_name(table_format))).c_str());
+            if (table_format == QType::NVFP4) {
+                (void)ops::common::validate_nvfp4_weight(weight, "dspine bridge table");
+            }
+        }
+        std::cout << "bridge tables bound as " << artifact::format_name(table_format)
+                  << ": codebook, tg, tsv reported\n";
+    });
+}
+
+template <class Fn>
+void rejects_with(Fn&& bind, std::string_view needle, const char* message) {
+    try {
+        bind();
+    } catch (const artifact::ArtifactError& error) {
+        const std::string reported = error.what();
+        if (reported.find(needle) == std::string::npos) {
+            throw std::runtime_error(std::string(message) + " (reported " + reported +
+                                     ", expected to contain " + std::string(needle) + ")");
+        }
+        std::cout << "rejected: " << reported << '\n';
+        return;
+    }
+    throw std::runtime_error(std::string(message) + " (no ArtifactError was raised)");
+}
+
+// (b) A declaration the bridge cannot execute is refused by name and format - the binding never
+// falls back to BF16 for a table the artifact declared some other way.
+void bridge_rejects_unsupported_declaration() {
+    BridgeTables tables(DspineFixture::kSized, QType::NVFP4, QuantLayout::BlockScaleK16M128x4,
+                        {{"dspine/bridge/codebook", {QType::MXFP8, QuantLayout::RowGroupScale}}});
+    rejects_with([&] { tables.add_component(); },
+                 "requires bf16 or nvfp4 storage, artifact declares mxfp8",
+                 "an MXFP8 codebook declaration was bound");
+}
+
+// (d) ops::dspine_serial_scores indexes tg and tsv as one representation; a mixed pair is refused
+// while binding, not at the first proposal.
+void bridge_rejects_mixed_tg_tsv() {
+    BridgeTables tables(DspineFixture::kSized, QType::NVFP4, QuantLayout::BlockScaleK16M128x4,
+                        {{"dspine/bridge/tsv", {QType::BF16, QuantLayout::Contiguous}}});
+    rejects_with([&] { tables.add_component(); }, "must share one storage format",
+                 "a BF16 tsv with an NVFP4 tg was bound");
+}
+
+// (b) The Binder's own representation check is intact: asking for a BF16 table that the artifact
+// declared NVFP4 is still the binder's rejection, so following the declaration cannot hide a
+// mismatch.
+void bridge_binder_check_unchanged() {
+    BridgeTables tables(DspineFixture::kSized, QType::NVFP4, QuantLayout::BlockScaleK16M128x4);
+    rejects_with(
+        [&] {
+            artifact::Binder binder(tables.reader);
+            Bindings bindings(binder);
+            (void)bindings.direct("dspine/bridge/tg", {DspineFixture::kSized.vocabulary,
+                                                      DspineFixture::kSized.rank});
+        },
+        "representation does not match its mathematical value type",
+        "a BF16 request for an NVFP4-declared table was bound");
+}
 
 void dspine_loads() {
     DspineFixture fixture;
@@ -378,6 +558,13 @@ int main() {
         dspine_rejects_mismatch();
         dspine_rejects_missing_component();
         dflash2_path_unchanged();
+        bridge_tables_bind_as_declared(DspineFixture::kSized, QType::NVFP4,
+                                       QuantLayout::BlockScaleK16M128x4);
+        bridge_tables_bind_as_declared(DspineFixture::kReference, QType::BF16,
+                                       QuantLayout::Contiguous);
+        bridge_rejects_unsupported_declaration();
+        bridge_rejects_mixed_tg_tsv();
+        bridge_binder_check_unchanged();
         std::cout << "DSpine load-side checks passed\n";
         return 0;
     } catch (const std::exception& error) {

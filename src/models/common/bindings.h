@@ -27,6 +27,11 @@ public:
                                      std::optional<QType> exact_format = {});
     [[nodiscard]] WeightId direct(std::string name, artifact::Shape shape,
                                   std::optional<QType> format = QType::BF16);
+    // Binds a direct tensor in the representation the artifact declares, limited to the formats
+    // the consuming operations can execute. The declaration is never overridden and never
+    // reinterpreted: a declared representation outside `accepted` fails the binding.
+    [[nodiscard]] WeightId direct_as_declared(std::string name, artifact::Shape shape,
+                                              std::span<const QType> accepted);
 
     [[nodiscard]] const PendingWeight& at(WeightId id) const { return weights.at(id.index); }
 

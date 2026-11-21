@@ -35,6 +35,10 @@ public:
                                                std::optional<QType> exact_format = {});
     [[nodiscard]] ParameterReference binding(std::string name, const Binding& binding, Shape shape,
                                              std::optional<QType> exact_format = {});
+    // The representation a logical Binding declares. A Binding covering several objects has one
+    // only when every object declares the same one; callers select a representation with this and
+    // pass it to parameter/binding, which keep validating the binding against it.
+    [[nodiscard]] QType declared_format(std::string_view name) const;
     [[nodiscard]] const Use& use(std::string_view parameter, std::string_view input) const;
     [[nodiscard]] bool contains(std::string_view parameter) const;
 

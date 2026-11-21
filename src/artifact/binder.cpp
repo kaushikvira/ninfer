@@ -55,6 +55,24 @@ ParameterReference Binder::binding(std::string name, const Binding& binding, Sha
     return {std::move(name), std::move(shape), binding};
 }
 
+QType Binder::declared_format(std::string_view name) const {
+    const auto found = reader_.directory().bindings.find(name);
+    if (found == reader_.directory().bindings.end()) {
+        throw ArtifactError("missing logical parameter " + std::string(name));
+    }
+    if (found->second.parts.empty()) {
+        throw ArtifactError(std::string(name) + ": value Binding is empty");
+    }
+    const auto format = reader_.geometry(found->second.parts.front().object).format;
+    for (const auto& part : found->second.parts) {
+        if (reader_.geometry(part.object).format != format) {
+            throw ArtifactError(std::string(name) +
+                                ": Binding covers objects of different representations");
+        }
+    }
+    return format;
+}
+
 const Use& Binder::use(std::string_view parameter, std::string_view input) const {
     const auto found = reader_.directory().uses.find({std::string(parameter), std::string(input)});
     if (found == reader_.directory().uses.end()) {
