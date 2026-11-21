@@ -553,7 +553,7 @@ struct Work {
         context_key, context_value, proposal, scratch_query, query_raw, key_raw,
         context_key_raw, codes_out;
     Tensor candidates, scores, table, tail_cand, drafts, proposal_q, index, idx_scores,
-        positions_rng, configs;
+        positions_rng, configs, chain_drafts;
     std::vector<std::unique_ptr<tool::PackedKVFixture>> caches;
     std::unique_ptr<DeviceBuffer> page_table;
 };
@@ -717,6 +717,9 @@ struct Work {
     out.table             = reals(std::int64_t(b) * kSlots * kSlots * slots,
                                   {b, kSlots, kSlots, slots});
     out.tail_cand         = integers(std::int64_t(b) * slots * kSlots, {b, slots, kSlots, 1});
+    // The greedy pair's drafts, at the layout serial_chain publishes them in: [drafts, batch].
+    // Sized with the rest of the walk's streams so the greedy pair costs the walk no allocation.
+    out.chain_drafts      = integers(std::int64_t(slots) * b, {slots, b, 1, 1});
     out.drafts            = integers(std::int64_t(b) * slots, {b, slots, 1, 1});
     out.proposal_q        = reals(std::int64_t(b) * slots * kSlots, {b, slots, kSlots, 1});
     out.index             = integers(std::int64_t(b) * slots * kSlots, {b, slots, kSlots, 1});
@@ -837,19 +840,156 @@ void run_bridge(Probe& probe, Work& work, MemoryArena& arena, const std::size_t 
          });
 }
 
-// The head writes [candidate, slot*batch]; the tail reads [batch, slot, candidate]. The engine
-// bridges the two at plan time; here the bridge is a host transpose of 240 words.
-void seed_tail_inputs(Work& work) {
+// The head writes [candidate, slot, batch] - the shape serial_scores and serial_chain are handed
+// (include/ninfer/ops/dspine_bridge.h:107-111: element (candidate, slot, batch) at
+// candidate + 16*(slot + drafts*batch)). The tail is handed [batch, slot, candidate]
+// (dspine_bridge.h:98-104, serial_tail_kernel's cand[b + batch*(slot + drafts*choice)]).
+//
+// The two ops declare TRANSPOSED shapes for one logical table, so the bridge is a real transpose
+// and not a relabel: the element the tail reads for (batch, slot, candidate) is the head's
+// (candidate, slot, batch), and the strides differ twice over - the slot and candidate axes swap,
+// and the candidate axis carries batch*drafts (15 at the prod shape) where the head's carries the
+// 16 candidates. Writing the head's bytes out under the head's own strides therefore hands the
+// tail other slots' ids: real vocabulary ids, from the wrong slot, and the T=0 arm of the tail
+// publishes ids the greedy pair never nominated. D-39's RED 2. The walk's own candidate-stream
+// check below is what sees it.
+void seed_tail_inputs(Probe& probe, Work& work) {
     const auto slots = work.candidates.ne[1];
+    // The permute reads a stream the head wrote one step ago ON THE WALK'S STREAM. A host copy is
+    // not sequenced against that stream, so without this the bridge can permute the PREVIOUS
+    // round's candidate rows - the second half of D-39's RED 2, and the reason round 2 of a walk
+    // carried ids round 1 had published. run_tail_case settles its launches the same way.
+    const CudaDeviceScope settling(probe.device);
+    cuda_ok(cudaDeviceSynchronize(), "the head's candidate rows before the tail's permute");
     const auto from  = download_i32(work.candidates);
     std::vector<std::int32_t> to(std::size_t(std::int64_t(kBatch) * slots * kSlots));
-    for (std::int32_t slot = 0; slot < slots; ++slot) {
-        for (std::int32_t cand = 0; cand < kSlots; ++cand) {
-            to[std::size_t(std::int64_t(cand) * kBatch + std::int64_t(slot) * kBatch * kSlots)] =
-                from[std::size_t(cand + std::int64_t(slot) * kSlots)];
+    for (std::int32_t batch = 0; batch < kBatch; ++batch) {
+        for (std::int32_t slot = 0; slot < slots; ++slot) {
+            for (std::int32_t cand = 0; cand < kSlots; ++cand) {
+                to[std::size_t(batch + std::int64_t(kBatch)
+                                            * (slot + std::int64_t(slots) * cand))] =
+                    from[std::size_t(cand
+                                     + std::int64_t(kSlots) * (slot + std::int64_t(slots) * batch))];
+            }
         }
     }
     upload(work.tail_cand.data, to.data(), to.size() * sizeof(std::int32_t), "tail candidates");
+}
+
+// Reads both candidate streams back and counts the (batch, slot, candidate) triples where the two
+// declared layouts do not say the same thing. 0 is the only answer a composed round can ship; see
+// seed_tail_inputs for why the two layouts are not the same bytes. The caller reads it only on a
+// pass that publishes (the first pass of a process publishes nothing), so the number is the number
+// of a real round.
+std::int32_t measure_tail_cand_layout(Probe& probe, Work& work) {
+    const auto slots = std::int32_t(work.candidates.ne[1]);
+    const CudaDeviceScope settling(probe.device);
+    cuda_ok(cudaDeviceSynchronize(), "the candidate streams before the layout check");
+    const auto head  = download_i32(work.candidates);
+    const auto tail  = download_i32(work.tail_cand);
+    std::int32_t misplaced = 0, first_slot = -1, first_cand = -1, read_id = 0, wrote_id = 0;
+    for (std::int32_t batch = 0; batch < kBatch; ++batch) {
+        for (std::int32_t slot = 0; slot < slots; ++slot) {
+            for (std::int32_t cand = 0; cand < kSlots; ++cand) {
+                const auto at_head = std::size_t(
+                    cand + std::int64_t(kSlots) * (slot + std::int64_t(slots) * batch));
+                const auto at_tail = std::size_t(
+                    batch + std::int64_t(kBatch) * (slot + std::int64_t(slots) * cand));
+                if (tail[at_tail] == head[at_head]) { continue; }
+                if (misplaced++ == 0) {
+                    first_slot = slot;
+                    first_cand = cand;
+                    read_id    = tail[at_tail];
+                    wrote_id   = head[at_head];
+                }
+            }
+        }
+    }
+    std::printf("        the tail's candidate stream: %d of %d ids are not where the tail's reader "
+                "looks",
+                int(misplaced), std::int32_t(kBatch) * kSlots * slots);
+    if (misplaced > 0) {
+        std::printf(" (first at slot %d, candidate %d: the tail reads %d, the head wrote %d)",
+                    int(first_slot), int(first_cand), int(read_id), int(wrote_id));
+    }
+    std::printf("\n");
+    std::fflush(stdout);
+    return misplaced;
+}
+
+// The intermediate the two acceptance arms share: serial_scores writes the FP32 score table and
+// the argmax of its own rows into idx, and serial_tail re-derives the argmax from the table. The
+// composed round only agrees if the table the tail reads is the row the argmax collapsed, so the
+// walk reads BOTH of its own streams back and compares them element by element: at every
+// (batch, sender, slot), the argmax over the table's candidate axis (the tail's rule, first max
+// wins ties) against the idx serial_scores published (the chain's rule). The first index where
+// they part is where the acceptance path parts, and it says whether it is the table, the argmax of
+// the table, or the walk that parts.
+std::int32_t measure_table_against_idx(Probe& probe, Work& work) {
+    const auto slots = std::int32_t(work.table.ne[3]);
+    const CudaDeviceScope settling(probe.device);
+    cuda_ok(cudaDeviceSynchronize(), "the score table and the idx before the comparison");
+    const auto table = [&] {
+        std::vector<float> values(std::size_t(std::int64_t(kBatch) * kSlots * kSlots * slots));
+        download(values.data(), work.table.data, values.size() * sizeof(float), "score table");
+        return values;
+    }();
+    const auto idx = download_i32(work.idx_scores);
+    std::int32_t flips = 0, at_slot = -1, at_sender = -1, wanted = 0, published = 0;
+    for (std::int32_t batch = 0; batch < kBatch; ++batch) {
+        for (std::int32_t slot = 0; slot < slots; ++slot) {
+            for (std::int32_t sender = 0; sender < kSlots; ++sender) {
+                std::int32_t best = 0;
+                for (std::int32_t cand = 1; cand < kSlots; ++cand) {
+                    const auto at = std::size_t((((std::int64_t(slot) * kSlots + sender) * kSlots
+                                                  + cand)) * kBatch + batch);
+                    if (table[at] > table[std::size_t(
+                            ((std::int64_t(slot) * kSlots + sender) * kSlots + best) * kBatch
+                            + batch)]) {
+                        best = cand;
+                    }
+                }
+                const auto published_at = std::size_t(
+                    (std::int64_t(batch) * slots + slot) * kSlots + sender);
+                if (idx[published_at] == best) { continue; }
+                if (flips++ == 0) {
+                    at_slot   = slot;
+                    at_sender = sender;
+                    wanted    = best;
+                    published = idx[published_at];
+                }
+            }
+        }
+    }
+    std::printf("        argmax(the round's table) against the round's own idx: %d of %d flips",
+                int(flips), std::int32_t(kBatch) * kSlots * slots);
+    if (flips > 0) {
+        std::printf(" (first at slot %d, sender %d: the table peaks at candidate %d, serial_scores"
+                    " published %d)",
+                    int(at_slot), int(at_sender), int(wanted), int(published));
+    }
+    std::printf("\n");
+    std::fflush(stdout);
+    return flips;
+}
+
+// The greedy pair over the streams of the round that just ran: dspine_serial_chain over the
+// head's [16, drafts, batch] candidate rows and serial_scores' idx.
+std::vector<std::int32_t> run_greedy_pair(Probe& probe, Work& work) {
+    const auto slots = std::int32_t(work.candidates.ne[1]);
+    ops::dspine_serial_chain(work.candidates.view({kSlots, slots, kBatch, 1}),
+                             work.idx_scores.view({kSlots, slots, kBatch, 1}),
+                             work.chain_drafts, probe.cuda().stream());
+    cuda_ok(cudaGetLastError(), "serial chain launch");
+    // The read-back of a stream the walk's stream produced is not sequenced against it: without
+    // this the round reads the PREVIOUS round's chain and the comparison is a round-skew artifact
+    // (which is what made the pair look a round behind the tail). run_tail_case settles the same
+    // way.
+    {
+        const CudaDeviceScope settling(probe.device);
+        cuda_ok(cudaDeviceSynchronize(), "the greedy pair before its readback");
+    }
+    return download_i32(work.chain_drafts);
 }
 
 // The whole proposal leg, on the real weights. It stops at the first gate: every later step
@@ -1083,7 +1223,7 @@ void run_forward(Probe& probe, Work& work, MemoryArena& arena) {
     });
     if (gated()) { return; }
     step("the tail's candidate layout: the head's [candidate, slot] to the tail's [slot, candidate]",
-         [&] { seed_tail_inputs(work); });
+         [&] { seed_tail_inputs(probe, work); });
     step("serial scores over the tower head, emitting the tail's FP32 score table", [&] {
         auto cand = work.candidates.view({kSlots, slots, b, 1});
         auto idx  = work.idx_scores.view({kSlots, slots, b, 1});
@@ -1199,7 +1339,11 @@ void seed_taps_rotated(const Tensor& taps) {
 
 // One full pass: the block walk, the head, the score table, then the tail at both policies.
 struct Round {
-    std::vector<std::int32_t> sampled, greedy;
+    // The round's own published drafts, its own greedy pair, and the head's candidate rows it
+    // published out of: every identity is a statement about ONE round's bytes.
+    std::vector<std::int32_t> sampled, greedy, chain, head;
+    std::int32_t table_flips = -1;
+    std::int32_t misplaced_cand = -1;
     bool complete = false;
 };
 
@@ -1225,6 +1369,28 @@ struct Round {
     out.sampled = tail("T=0.9 top_k=20 top_p=1.0 min_p=0.05 (the production policy)", 0.9f, 20,
                         1.0f, 0.05f);
     out.greedy  = tail("T=0 (the greedy degenerate of the same op)", 0.0f, 20, 1.0f, 0.0f);
+    // Every identity below is a statement about ONE round: the greedy pair runs over this round's
+    // idx, and the candidate-layout count reads this round's cand streams. Taking them after a
+    // LATER round (the teeth round rotates the taps) compares one round's drafts to another's
+    // inputs - which is how D-39's "15 real ids vs the tail's ids" was produced.
+    const auto chain = [&](const char* label) {
+        try {
+            ++counters.steps;
+            return run_greedy_pair(probe, work);
+        } catch (const std::exception& error) {
+            ++counters.gates;
+            std::printf("  GATE  the greedy pair at %s : %s\n", label, error.what());
+            return std::vector<std::int32_t>{};
+        }
+    };
+    out.chain = chain("this round");
+    out.head  = download_i32(work.candidates);
+    std::printf("  the round's own greedy pair =");
+    for (const auto one : out.chain) { std::printf(" %d", one); }
+    std::printf("\n");
+    std::fflush(stdout);
+    out.misplaced_cand = measure_tail_cand_layout(probe, work);
+    out.table_flips    = measure_table_against_idx(probe, work);
     return out;
 }
 
@@ -1403,34 +1569,80 @@ int main(const int argc, char** argv) {
                         "taps");
 
                 // The T=0 arm is the greedy degenerate of the sampled op: it must equal the
-                // greedy pair (dspine_serial_scores' idx walked by dspine_serial_chain).
-                // The greedy pair's own two ops over the walk's head rows and the score table's
-                // argmax twin (serial_scores' idx): the chain this T=0 arm must reproduce exactly.
-                std::printf("T=0 against the greedy pair over this round's own idx\n");
+                // greedy pair (dspine_serial_scores' idx walked by dspine_serial_chain) over the
+                // SAME round. The pair ran inside each round, over that round's own idx; the
+                // streams the probe holds now are the last round's, so a pair launched out here
+                // would walk the teeth round's idx against the first round's drafts (D-39's
+                // "15 real ids vs the tail's ids"). The first pass of a process publishes nothing
+                // (the module-load pass), so the verdict is taken on the passes that published.
                 const auto slots = std::int32_t(work.candidates.ne[1]);
-                auto greedy = probe.buffer(std::size_t(4) * slots * kBatch, DType::I32,
-                                           {slots, kBatch, 1, 1});
-                step("the greedy pair: dspine_serial_chain over the head's rows and the "
-                     "serial_scores idx",
-                     [&] {
-                         auto chain_cand = work.candidates.view({kSlots, slots, kBatch, 1});
-                         auto chain_idx  = work.idx_scores.view({kSlots, slots, kBatch, 1});
-                         ops::dspine_serial_chain(chain_cand, chain_idx, greedy,
-                                                  probe.cuda().stream());
-                         cuda_ok(cudaGetLastError(), "serial chain launch");
-                     });
-                if (complete()) {
-                    const auto pair = download_i32(greedy);
-                    const auto show = [](const char* label, const std::vector<std::int32_t>& v) {
-                        std::printf("        %s =", label);
-                        for (const auto one : v) { std::printf(" %d", one); }
-                        std::printf("\n");
-                    };
-                    show("serial_chain (serial_scores' idx)", pair);
-                    show("serial_tail at T=0            ", first.greedy);
-                    require(pair == first.greedy,
+                std::printf("T=0 against the greedy pair, per round, on each round's own idx\n");
+                const auto at = [&](const std::vector<std::int32_t>& v, std::int32_t batch,
+                                     std::int32_t slot, const bool batch_first) {
+                    return v[std::size_t(batch_first
+                                             ? batch + std::int64_t(kBatch) * slot
+                                             : slot + std::int64_t(slots) * batch)];
+                };
+                const auto judge = [&](const Round& round, const std::string& name) {
+                    if (not round.complete) { return; }
+                    std::printf("  %s\n", name.c_str());
+                    require(round.misplaced_cand == 0,
+                            "the tail's candidate stream is not the head's candidate set in the "
+                            "tail's layout");
+                    require(round.table_flips == 0,
+                            "the argmax of the round's score table is not the idx serial_scores "
+                            "published for it");
+                    // serial_chain publishes [drafts, batch], serial_tail [batch, drafts]: the
+                    // two declared layouts are transposed, so the identity is read on the
+                    // (batch, slot) pairs they name, not on the flat bytes.
+                    std::int32_t differ = 0, pair_zero = 0;
+                    for (std::int32_t batch = 0; batch < kBatch; ++batch) {
+                        for (std::int32_t slot = 0; slot < slots; ++slot) {
+                            differ += at(round.chain, batch, slot, false)
+                                   != at(round.greedy, batch, slot, true);
+                            pair_zero += at(round.greedy, batch, slot, true) == 0;
+                        }
+                    }
+                    if (pair_zero == std::int32_t(kBatch) * slots) {
+                        std::printf("        the round published no drafts (the module-load "
+                                    "pass): the identity is taken on a publishing pass\n");
+                        std::fflush(stdout);
+                        return;
+                    }
+                    require(differ == 0,
                             "the T=0 tail did not equal the greedy pair over the same idx");
-                }
+                    // The sparse acceptor's own contract, on both arms: every published draft is
+                    // one of that slot's 16 candidate ids (serial_tail_accept_q_error). A tail
+                    // handed the wrong candidate table draws real ids of the wrong slot, which is
+                    // exactly what this refuses.
+                    const auto member_check = [&](const char* label,
+                                                  const std::vector<std::int32_t>& drafts) {
+                        std::int32_t foreign = 0;
+                        for (std::int32_t batch = 0; batch < kBatch; ++batch) {
+                            for (std::int32_t slot = 0; slot < slots; ++slot) {
+                                const auto drawn  = at(drafts, batch, slot, true);
+                                bool member       = false;
+                                for (std::int32_t cand = 0; cand < kSlots; ++cand) {
+                                    member = member || round.head[std::size_t(
+                                        cand + std::int64_t(kSlots)
+                                             * (slot + std::int64_t(slots) * batch))]
+                                          == drawn;
+                                }
+                                foreign += not member;
+                            }
+                        }
+                        std::printf("        %s: %d of %d drafts are not one of their slot's "
+                                    "16 candidates\n",
+                                    label, int(foreign), std::int32_t(kBatch) * slots);
+                        std::fflush(stdout);
+                        require(foreign == 0,
+                                "a published draft is not one of its slot's 16 candidate ids");
+                    };
+                    member_check("the T=0 arm  ", round.greedy);
+                    member_check("the T=0.9 arm", round.sampled);
+                };
+                judge(second, "the second pass (the first that publishes)");
+                judge(mutated, "the rotated-tap pass (the teeth round)");
             }
         }
     } catch (const std::exception& error) {
