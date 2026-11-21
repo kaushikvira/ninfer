@@ -135,6 +135,7 @@ Both are closed; the T=0.9 arm is no longer blocked twice over.
 | `B-fp8-vs-q8` | device FP8-head `idx` vs device Q8-head `idx` (values of one matrix, two formats) | 0–2 of 240 argmax flips; table rel-Fro **6.8e-3** — the representation trade, priced not gated |
 | `C-teeth` | reference-side head-decode defects: scale group offset / dropped sign / **packed (unpadded) code stride** / row-scale broadcast, and the rms·(m·tg) term dropped from the table | every kind bites; `packed_stride_read` only on a **padded** head (205–208 of 240 idx), which is why that geometry is in the suite |
 | `D-compose` | device table → device `serial_tail`: **T=0.9, top_k 20, top_p 1.0, min_p 0.05** (prod) and T=0 | 15/15 drafts per row (30/30 at batch 2) with normalised finite `proposal_q` and every drawn id among the slot's 16 candidates; **T=0 == `serial_scores` + `serial_chain` BIT-EXACT** (D-24's free equivalence, now measured through the composed path) |
+| `Z-gate` | four arms the op's contract must *refuse*: a Q8 head claiming `group = 16`, one claiming a BF16 scale plane, one with a padded column count that is not a whole number of groups, and the score table declared BF16 (only the `Weight` metadata is warped — never the planes) | **all four GATE-REJECTED, naming the field** (`q8 head group must be 32 (the G32 of the format)`, `… scale_dtype must be FP16`, `… whole 32-column groups in k and padded_shape[1]`, `scores must be FP32 […]`) — the acceptance of the tower's format is a decision of a gate that fires on the near-misses |
 
 **Head format: how Q8 is gathered, with no copy.** `serial_scores_kernel` is templated on
 `HeadQ8` and takes a `HeadRef {codes, scales, row_stride, scale_groups}`; per element it reads
@@ -185,7 +186,10 @@ the ulp band that suits `rms` (a 5120-wide sum of squares) is the wrong yardstic
 op-development rule for this family is normwise with a gross pointwise ceiling, and the teeth
 (`tg` term dropped: rel-Fro 4.3e-2) sit two to three orders above the band. The argmax rows
 (`A-q8-gather`, `A-table-argmax`) stay at zero band, which is what makes a head defect
-visible at all.
+visible at all. The criterion's **non-finite rule is explicit**: a non-finite in the emitted
+table is a failure in itself (`NON-FINITE`, exit 1) and not a distance — the op cannot see one
+at call time without a host sync, so the harness is where the tail's `scores must be finite`
+precondition gets its check on the producer side.
 
 `headdom` (`rms` x 1e-3) is the counterpart of the `tgdom` arm above. `serial_scores`' ranking
 is `base(head) + rms * (m · tg)`, and which term decides the argmax is a property of the

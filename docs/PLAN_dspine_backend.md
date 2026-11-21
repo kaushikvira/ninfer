@@ -734,6 +734,7 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   | device FP8 head vs device Q8 head | 0–2 of 240 argmax flips; table rel-Fro **6.8e-3** — the representation trade, priced not gated |
   | head teeth (scale-group offset, dropped sign, **packed unpadded code stride**, row-scale broadcast) + `rms·(m·tg)` dropped from the table | all five kinds bite; the stride tooth **only exists on a padded head** (205–208 of 240 idx) — which is why that geometry is in the suite |
   | device table → device `serial_tail`, **T=0.9 top_k 20 top_p 1.0 min_p 0.05** and T=0 | 15/15 drafts per row (30/30 at batch 2), finite normalised `proposal_q`, every drawn id among the slot's 16 candidates; **T=0 == `serial_scores` + `serial_chain` BIT-EXACT** through the composed path |
+  | four arms the contract must refuse: a Q8 head claiming `group = 16`, one claiming a BF16 scale plane, one with a padded column count that is not a whole number of 32-column groups, the score table declared BF16 (only the `Weight` metadata is warped, never the planes) | **all 16 arms GATE-REJECTED naming the field** (`q8 head group must be 32 (the G32 of the format)`, `… scale_dtype must be FP16`, `… whole 32-column groups in k and padded_shape[1]`, `scores must be FP32 […]`) |
   **The score table is a matrix-family reduction, judged normwise** (op-development rule): the
   device order is fixed by the kernel (16 strided partial sums, sequential combine) where NumPy
   reduces pairwise, so the same vectors differ by cancellation — 1.4e4 raw fp32 ulps pointwise
@@ -750,7 +751,13 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   with no `-isystem …/targets/x86_64-linux/include`**, so `tests/test_host_timing.cpp` fails on
   `nvtx3/nvToolsExt.h` in a fresh `rtx5090-ops` build; the resolved
   `/usr/local/cuda-13.1/bin/nvcc` (what `build/rtx5090-dev` carries) compiles it. Use the
-  resolved path in new worktrees.
+  resolved path in new worktrees. (c) `⚠` **The tree does not build clean at the base of this
+  work:** `tests/models/qwen3_5/test_dspine_forward_real.cpp` (`c7d09a66`) assigns `owner` and
+  `work_device` at its lines 396–397 and reads `owner->storage` at 263 with **neither ever
+  declared** — the parked forward-walk fragment went in with its declarations missing, so
+  `ninfer_qwen3_5_dspine_forward_real_test` cannot compile and a whole-tree `ninja` stops there
+  (this build ran `ninja -k 0` around it). Left for the forward's owner to repair, not patched
+  from here.
   **Gate: P3 stays 2/5** — criteria 1–2 green, and criteria 3–5 now sit behind the forward's
   instantiated shapes (35) alone, not behind these two. Code: `ops/dspine_bridge/{kernels.cu,
   dspine_bridge.cpp, launch.h}`, `include/ninfer/ops/dspine_bridge.h`, the two parity fixtures,
