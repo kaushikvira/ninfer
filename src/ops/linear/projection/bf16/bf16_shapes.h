@@ -43,6 +43,8 @@ namespace ninfer::ops::detail {
 
 [[nodiscard]] Bf16Launch select_bf16_n14336_k5120(std::int32_t tokens);
 [[nodiscard]] Bf16Launch select_bf16_n5120_k6144(std::int32_t tokens);
+[[nodiscard]] Bf16Launch select_bf16_n512_k1024(std::int32_t tokens);
+[[nodiscard]] Bf16Launch select_bf16_n5120_k512(std::int32_t tokens);
 [[nodiscard]] Bf16Launch select_bf16_n48_k2560(std::int32_t tokens);
 [[nodiscard]] Bf16Launch select_bf16_n96_k2560(std::int32_t tokens);
 [[nodiscard]] Bf16Launch select_bf16_n1664_k2560(std::int32_t tokens);
