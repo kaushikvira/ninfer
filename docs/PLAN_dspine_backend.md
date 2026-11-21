@@ -130,7 +130,7 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 - open-risks: R5 drift (8–10 wk, MED) · R3 V3-tower accept (P2) · R4 accept
   <~5 tok/round (P2 now owns it)
 - last-gate: **P0c decided 2026-11-22 → (c) skip** (`D-2026-11-21-17`)
-- p2-gaps: **the two D-34 gaps below the shapes are CLOSED** (`D-2026-11-21-36`): the proposal
+- p2-gaps: **the two D-34 gaps below the shapes are CLOSED** (`D-2026-11-21-37`): the proposal
   head is the tower's `q8_g32_fp16` and `dspine_serial_scores` now gathers it (dequant on
   gather, no copy: 2.35 GiB of BF16 staging that D-14's sizing has no room for), and the op
   emits the tail's FP32 `[batch,16,16,drafts]` score table as an out-param. Measured: Q8-head
@@ -576,6 +576,14 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **names**, reading each packed object **seven times**; the sizing number is the
   **per-object** one. **Sizing rule from now on: count objects, not binding names**
   (verify with `dspine_inventory`/the per-object probe, not the name sum).
+  `⚠` **CTEST LABEL EXCLUSION IS A REGEX, NOT A `;` LIST (found running this work's suite):**
+  `ctest -LE gpu;real;bench` in bash is `ctest -LE gpu` plus two shell words — it excludes
+  `gpu` only, and `-LE 'gpu;real;bench'` (quoted) matches the literal label and excludes
+  *nothing*: the box then runs its 33 GPU tests against the prod card at 93 % and reports 101
+  failures that measure nothing. Write `ctest -LE 'gpu|real|bench'`, and for the
+  GPU-free CPU baseline run `CUDA_VISIBLE_DEVICES='' ctest` so the device tests skip
+  themselves (measured: 198 pass / 10 fail / 208, the 10 being the forward-real TU above plus
+  the pre-existing glm5next/tool-schema set, none of them dspine).
   Merged `4fbaba55`. **P3 criterion 3 = load half MEASURED ON DEVICE** (55 objects,
   **3.83186 GiB** incl. the reused tower head+embedding, 0.29 s h2d, zero-copy) —
   **the forward half is BLOCKED on nvfp4 linear geometry** (D-34): feature
@@ -751,13 +759,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   with no `-isystem …/targets/x86_64-linux/include`**, so `tests/test_host_timing.cpp` fails on
   `nvtx3/nvToolsExt.h` in a fresh `rtx5090-ops` build; the resolved
   `/usr/local/cuda-13.1/bin/nvcc` (what `build/rtx5090-dev` carries) compiles it. Use the
-  resolved path in new worktrees. (c) `⚠` **The tree does not build clean at the base of this
-  work:** `tests/models/qwen3_5/test_dspine_forward_real.cpp` (`c7d09a66`) assigns `owner` and
-  `work_device` at its lines 396–397 and reads `owner->storage` at 263 with **neither ever
-  declared** — the parked forward-walk fragment went in with its declarations missing, so
-  `ninfer_qwen3_5_dspine_forward_real_test` cannot compile and a whole-tree `ninja` stops there
-  (this build ran `ninja -k 0` around it). Left for the forward's owner to repair, not patched
-  from here.
+  resolved path in new worktrees. (c) **Confirmed the `⚠` of D-36 from the far side:** at the base
+  of this work (`4ddee03a`) `tests/models/qwen3_5/test_dspine_forward_real.cpp` assigns `owner`
+  and `work_device` and declares neither, so `ninfer_qwen3_5_dspine_forward_real_test` cannot
+  compile and a whole-tree `ninja` stops there — this build ran `ninja -k 0` around it, and the
+  CPU suite reports it as the one `Not Run`. Repaired on the line by `0b03043b`; nothing of the
+  head work touches it.
   **Gate: P3 stays 2/5** — criteria 1–2 green, and criteria 3–5 now sit behind the forward's
   instantiated shapes (35) alone, not behind these two. Code: `ops/dspine_bridge/{kernels.cu,
   dspine_bridge.cpp, launch.h}`, `include/ninfer/ops/dspine_bridge.h`, the two parity fixtures,
