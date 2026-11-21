@@ -127,8 +127,8 @@ namespace {
 using namespace ninfer;
 using namespace ninfer::models;
 namespace dspine    = ninfer::models::dspine;
-namespace qwen      = ninfer::models::qwen3_5;
-namespace execution = qwen::execution;
+namespace q35       = ninfer::models::qwen3_5;
+namespace execution = q35::execution;
 
 constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
 constexpr std::int32_t kSlots = 16;
@@ -335,13 +335,13 @@ struct DrafterContext {
                    const std::int32_t kv_heads, const std::int32_t capacity) {
         LayoutBuilder builder;
         const auto layout =
-            qwen::plan_paged_kv_cache(builder, layers, dimension(capacity), kv_heads, head_dim,
+            q35::plan_paged_kv_cache(builder, layers, dimension(capacity), kv_heads, head_dim,
                                        KvCacheStorage::BFloat16, kBatch);
         pages_ = layout.pages.page_bytes;
         tables_.emplace(owner->device, builder.finish(256, "dspine fidelity page tables"));
         records_.emplace(owner->device, pages_ + layout.pages.alignment);
         records_->fill(0);
-        cache_ = std::make_unique<qwen::PagedKVCache>(records_->span(), tables_->span(), layout);
+        cache_ = std::make_unique<q35::PagedKVCache>(records_->span(), tables_->span(), layout);
         staging_.emplace(sizeof(std::int64_t) * std::size_t(layout.execution_tables.spec
                                                                 .logical_page_capacity));
         offsets_.assign(std::size_t(layout.execution_tables.spec.logical_page_capacity), 0);
@@ -362,7 +362,7 @@ struct DrafterContext {
     std::optional<DeviceBuffer> records_, tables_;
     std::optional<PinnedHostBuffer> staging_;
     std::vector<std::int64_t> offsets_;
-    std::unique_ptr<qwen::PagedKVCache> cache_;
+    std::unique_ptr<q35::PagedKVCache> cache_;
 };
 
 // ---------------------------------------------------------------- the round's streams ----------
@@ -717,15 +717,15 @@ struct SpecArm {
                      ops::kv_cache_append_prefix(
                          round->context_key, round->context_value, round->context_positions,
                          round->context_counts, round->table_rows,
-                         ops::KVCacheAppendPrefixExecutionEnvelope{std::uint32_t(g.ctx),
-                                                                   std::uint32_t(g.ctx)},
+                         ops::KVCacheAppendPrefixExecutionEnvelope{static_cast<std::uint32_t>(g.ctx),
+                                                                   static_cast<std::uint32_t>(g.ctx)},
                          pages->layer(layer), cuda);
                  });
         }
         const ops::AttentionHeadGeometry heads{g.d, g.qh, g.kvh};
         const auto scale = float(1.0 / std::sqrt(double(g.d)));
         const auto context_envelope =
-            ops::ContextAttentionExecutionEnvelope{std::uint32_t(g.ctx), std::uint32_t(g.ctx)};
+            ops::ContextAttentionExecutionEnvelope{static_cast<std::uint32_t>(g.ctx), static_cast<std::uint32_t>(g.ctx)};
         bool pre_normed = false;
         for (std::size_t layer = 0; layer < layers.size(); ++layer) {
             const auto& block = layers[layer];
@@ -871,8 +871,8 @@ namespace {
     char buffer[160];
     std::snprintf(buffer, sizeof(buffer), "%p n=%d k=%d qtype=%d layout=%d",
                   const_cast<void*>(std::bit_cast<void*>(weight.qdata)), weight.n, weight.k,
-                  std::to_integer<std::int32_t>(weight.qtype),
-                  std::to_integer<std::int32_t>(weight.layout));
+                  static_cast<std::int32_t>(weight.qtype),
+                  static_cast<std::int32_t>(weight.layout));
     return buffer;
 }
 
@@ -981,13 +981,13 @@ template <class Value>
             } else if (ulp == 16) {
                 std::snprintf(buffer, sizeof(buffer),
                               "at element %zu: specification 0x%04x, executor 0x%04x",
-                              index, std::to_integer<std::uint32_t>(specification[index]),
-                              std::to_integer<std::uint32_t>(executor[index]));
+                              index, static_cast<std::uint32_t>(specification[index]),
+                              static_cast<std::uint32_t>(executor[index]));
             } else {
                 std::snprintf(buffer, sizeof(buffer), "at element %zu: specification %d, "
                                     "executor %d",
-                              index, std::to_integer<std::int32_t>(specification[index]),
-                              std::to_integer<std::int32_t>(executor[index]));
+                              index, static_cast<std::int32_t>(specification[index]),
+                              static_cast<std::int32_t>(executor[index]));
             }
             out.detail = buffer;
         }
@@ -1001,7 +1001,7 @@ void report(const Fidelity& row) {
                 row.maximum == 0 ? "0 ulp" : [&] {
                     char buffer[48];
                     std::snprintf(buffer, sizeof(buffer), "%lld %s",
-                                  long long(row.maximum),
+                                  static_cast<long long>(row.maximum),
                                   row.arms == 32 ? "fp32-ulp" : "bf16-ulp");
                     return std::string(buffer);
                 }()
@@ -1072,7 +1072,7 @@ int main(const int argc, char** argv) {
         options.purpose       = EnginePurpose::Generation;
         options.speculative   = SpeculativeBackend::Dspine;
         options.proposal_head = ProposalHead::Full;
-        const auto definition = qwen::read_definition(probe.reader, options);
+        const auto definition = q35::read_definition(probe.reader, options);
         const auto profile    = execution::describe_model(*definition);
         const auto& weights   = definition->weights();
         if (!weights.dspine || !profile->config.dspine) {
@@ -1081,7 +1081,7 @@ int main(const int argc, char** argv) {
         }
         const auto& draft     = *profile->config.dspine;
         const auto& tower     = profile->config.text;
-        auto plan = qwen::resolve_load(probe.reader, definition, probe.device);
+        auto plan = q35::resolve_load(probe.reader, definition, probe.device);
         const auto [free, total] = probe.memory();
         const auto need = plan.materialization().device_capacity_bytes;
         const auto slack = std::uint64_t(std::stoull(setting("NINFER_FIDELITY_SLACK", "768")))
@@ -1098,7 +1098,7 @@ int main(const int argc, char** argv) {
             return 3;
         }
         const auto began = std::chrono::steady_clock::now();
-        auto model       = qwen::materialize_model(std::move(plan), probe.context);
+        auto model       = q35::materialize_model(std::move(plan), probe.context);
         const auto elapsed = std::chrono::duration_cast<
             std::chrono::duration<double, std::ratio<1, 1000>>>(std::chrono::steady_clock::now()
                                                                 - began);
@@ -1109,8 +1109,113 @@ int main(const int argc, char** argv) {
                     "(%.2f s through materialize_model); device free %llu -> %llu MiB\n",
                     stats.device_object_count, stats.device_capacity_bytes / kGiB,
                     stats.h2d_bytes / kGiB, stats.upload_seconds, elapsed.count() / 1000.0,
-                    unsigned long long(free / 1024 / 1024),
-                    unsigned long long(after / 1024 / 1024));
+                    static_cast<unsigned long long>(free / 1024 / 1024),
+                    static_cast<unsigned long long>(after / 1024 / 1024));
+        std::fflush(stdout);
+        // The binding census. The executor builds its `DspineParameters` one projection at a
+        // time through `Prepare::linear(WeightId)`
+        // (src/models/qwen3_5/execution/parameters.cpp:367-427), and the `WeightId` form of
+        // `weight_input` refuses a parameter whose declared uses are not exactly one
+        // (src/models/common/weights.cpp:15-18) — a shared parameter is only usable through a
+        // `WeightUseId`, which names the mathematical use as well as the object. The census is
+        // that test, parameter by parameter, against the definition's own declared-use table
+        // (`ModelDefinition::uses`) and the shard's, printed before the construction: the
+        // executor's stop is then a row of a table, not only an exception.
+        {
+            std::vector<std::pair<std::string, WeightId>> projections;
+            try {
+                // The definition's own id table for the drafter: the same
+                // `dspine::bind_weights` result `execution::Parameters` binds through, with
+                // `token_embedding`/`output_head` already aliased to the tower's
+                // (src/models/qwen3_5/definition.cpp:93-100).
+                if (not definition->weights().dspine) {
+                    throw std::runtime_error("the definition carries no drafter id table");
+                }
+                const auto& ids = *definition->weights().dspine;
+                projections.emplace_back("feature_projection", ids.feature_projection);
+                for (std::size_t layer = 0; layer < ids.layers.size(); ++layer) {
+                    const auto prefix = "layer/" + std::to_string(layer);
+                    const auto& attention = ids.layers[layer].attention;
+                    const auto& mlp       = ids.layers[layer].mlp;
+                    projections.emplace_back(prefix + "/attention/query", attention.query);
+                    projections.emplace_back(prefix + "/attention/key", attention.key);
+                    projections.emplace_back(prefix + "/attention/value", attention.value);
+                    projections.emplace_back(prefix + "/attention/context_key",
+                                             attention.context_key);
+                    projections.emplace_back(prefix + "/attention/context_value",
+                                             attention.context_value);
+                    projections.emplace_back(prefix + "/attention/output", attention.output);
+                    projections.emplace_back(prefix + "/mlp/gate", mlp.gate);
+                    projections.emplace_back(prefix + "/mlp/up", mlp.up);
+                    projections.emplace_back(prefix + "/mlp/down", mlp.down);
+                }
+                projections.emplace_back("bridge/read_weight", ids.bridge.read_weight);
+                projections.emplace_back("bridge/early_read_weights",
+                                         ids.bridge.early_read_weights);
+                projections.emplace_back("bridge/feature_write_weights",
+                                         ids.bridge.feature_write_weights);
+                projections.emplace_back("bridge/gate", ids.bridge.gate);
+                projections.emplace_back("bridge/predecessor_gate", ids.bridge.predecessor_gate);
+                projections.emplace_back("bridge/prev", ids.bridge.prev);
+                projections.emplace_back("bridge/tg", ids.bridge.tg);
+                projections.emplace_back("bridge/tsv", ids.bridge.tsv);
+                projections.emplace_back("bridge/codebook", ids.bridge.codebook);
+                projections.emplace_back("token_embedding", ids.token_embedding);
+                projections.emplace_back("output_head", ids.output_head);
+            } catch (const std::exception& failure) {
+                std::printf("census: the drafter's id table is not bindable: %s\n",
+                            failure.what());
+            }
+            std::printf("census: every drafter projection and table `execution::Parameters` "
+                        "binds. `declared` is the use\n            list the definition carries "
+                        "for the parameter and `carried` what the loaded parameter\n            "
+                        "has. The rule the binding runs on is the one at the right of the "
+                        "header\n");
+            std::printf("%-44s %12s %10s %6s %9s %8s  %s\n",
+                        "parameter", "rows", "columns", "parts", "declared", "carried",
+                        "linear(WeightId) needs one use");
+            for (const auto& [label, id] : projections) {
+                const auto& view = model->weight(id).view;
+                const auto  rank = view.shape.size();
+                const auto  rows = rank == 0 ? std::size_t(0) : std::size_t(view.shape[rank - 2]);
+                const auto  cols = rank == 0 ? std::size_t(0) : std::size_t(view.shape[rank - 1]);
+                std::printf("%-44s %12zu %10zu %6zu %9zu %8zu  %s\n",
+                            model->weight(id).name.c_str(),
+                            rows,
+                            cols,
+                            view.parts.size(),
+                            definition->uses(id).size(),
+                            model->weight(id).uses.size(),
+                            model->weight(id).uses.size() == 1
+                                ? "ok"
+                                : "REFUSED: the parameter carries no single declared use");
+            }
+            std::fflush(stdout);
+        }
+        // The construction is the executor's own step, and on this artifact it is where the
+        // DSpine round stops. The pair, printed before the call so a stop in it names both
+        // sides of itself:
+        //
+        //   the producer  src/models/common/dspine/weights.cpp:176,179,181,182 binds the four
+        //                 bridge projections the bridge multiplies through `Bindings::direct`,
+        //                 the input-less form (`binds.cpp:114` calls
+        //                 `parameter(name, shape, {}, format)`), so the artifact's own declared
+        //                 use for each of them - the manifest lists
+        //                 `dspine/bridge/gate` on input `dspine/bridge/packed_input`, and the
+        //                 same for `predecessor_gate`, `prev`, `read_weight` on
+        //                 `dspine/bridge/read_input`, `early_read_weights` on
+        //                 `dspine/bridge/early_read_input`, `feature_write_weights` on
+        //                 `dspine/bridge/message_input` - never reaches the parameter. The
+        //                 drafter's layer projections, bound a few lines earlier through
+        //                 `b.parameter(name, shape, {p + "mlp_input"})` and friends
+        //                 (`weights.cpp:158,166`), do carry theirs: the `declared`/`carried`
+        //                 columns above are 1/1 for every one of them, 0/0 for the bridge's six.
+        //   the consumer  src/models/qwen3_5/execution/parameters.cpp:280-282 and :299 bind the
+        //                 same parameters with `linear(WeightId)`, whose rule is
+        //                 `src/models/common/weights.cpp:17-18`: a parameter that does not carry
+        //                 exactly one declared use is refused, because a shared projection is
+        //                 usable only through a named mathematical use.
+        std::printf("bind: building execution::Parameters (the executor's DspineParameters)\n");
         std::fflush(stdout);
         const execution::Parameters parameters(*model, profile);
         if (!parameters.dspine || parameters.dspine->layers.empty()) {
@@ -1250,8 +1355,8 @@ int main(const int argc, char** argv) {
         const std::uint32_t layers = std::uint32_t(spec.layers.size());
         DrafterContext spec_pages(layers, g.d, dim(draft.num_key_value_heads), g.ctx);
         DrafterContext exec_pages(layers, g.d, dim(draft.num_key_value_heads), g.ctx);
-        const auto envelope = ops::ContextAttentionExecutionEnvelope{std::uint32_t(g.ctx),
-                                                                    std::uint32_t(g.ctx)};
+        const auto envelope = ops::ContextAttentionExecutionEnvelope{static_cast<std::uint32_t>(g.ctx),
+                                                                    static_cast<std::uint32_t>(g.ctx)};
         // The walk's share of the round, by the function the plan sizes it with
         // (program/planning/startup.cpp:435), and the tail's share, by the terms startup.cpp:386
         // -408 sums. One arena carries both, as the engine's round arena does: the walk rewinds it
@@ -1304,15 +1409,15 @@ int main(const int argc, char** argv) {
                     view, exec_round.taps.view({g.h * g.taps, g.ctx, g.b, 1}),
                     exec_round.context_positions, exec_round.context_counts,
                     exec_round.table_rows,
-                    ops::KVCacheAppendPrefixExecutionEnvelope{std::uint32_t(g.ctx),
-                                                              std::uint32_t(g.ctx)});
+                    ops::KVCacheAppendPrefixExecutionEnvelope{static_cast<std::uint32_t>(g.ctx),
+                                                              static_cast<std::uint32_t>(g.ctx)});
                 cuda_ok(cudaGetLastError(), "dspine_append_context launch");
             });
             const execution::DspineWalkInputs walk_inputs{exec_round.anchors,
                                                           exec_round.lengths,
                                                           exec_round.valid,
                                                           exec_round.table_rows};
-            const execution::DspineWalkOutputs walk_outputs{
+            execution::DspineWalkOutputs walk_outputs{
                 exec_round.ids, exec_round.positions, exec_round.stash, exec_round.rms,
                 exec_round.message, exec_round.normed};
             step("executor: dspine_walk", [&] {
@@ -1327,7 +1432,7 @@ int main(const int argc, char** argv) {
             const execution::DspineTailInputs tail_inputs{
                 exec_round.stash, exec_round.rms, exec_round.message, exec_round.normed,
                 exec_round.anchors, exec_round.draw_positions, sampling};
-            const execution::DspineTailOutputs tail_outputs{
+            execution::DspineTailOutputs tail_outputs{
                 exec_round.drafts, exec_round.candidate_ids, exec_round.proposal_q};
             step("executor: dspine_propose_tail", [&] {
                 execution::dspine_propose_tail(tail_view, tail_inputs, tail_outputs, exec_arena,
@@ -1463,7 +1568,7 @@ int main(const int argc, char** argv) {
             reds += not exact;
             std::printf("FIDELITY %-30s %s  rounds bit-exact %d/%d  max %lld ulp  first %s\n",
                         label.c_str(), exact ? "BIT-EXACT" : "PARTS", row.clean, row.rounds,
-                        long long(row.maximum),
+                        static_cast<long long>(row.maximum),
                         row.detail.empty() ? "none" : row.detail.c_str());
         }
         std::printf("determinism: %d of %d rounds part from the previous round on the "
