@@ -22,6 +22,12 @@ The executable `--help` output is the exact source for command-line option spell
 Published artifact downloads are listed in the [project README](../README.md).
 [Versioned model cards](../model-cards/) own each artifact's identity, provenance and evaluation results.
 
+## Plans
+
+| Document | Purpose |
+|---|---|
+| [DSpine backend plan](PLAN_dspine_backend.md) | durable context store for the DSpine spec-decoding build: STATUS cursor, append-only decision ledger, phases/gates, GPU + model-routing rules (survives compaction — read this first on resume) |
+
 ## Internal architecture
 
 内部文档记录跨模块设计、重要数值取舍和开发方法。具体类型、接口、支持几何与 codec
