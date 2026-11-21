@@ -37,32 +37,42 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- P2 stage 2: **MERGED** `9a562172` (from `076e9cb4` host core, `55062599` device
-  op, `56335d5e` compile fixes). **K1+K2 PARITY CLEARED on GPU 1** (D-25:
-  4 cases / 0 skipped / exit 0, eager **and** graph-captured, batch-2 case). Host-core tail tests PASS CPU-only (8 groups
-  incl. greedy degeneracy, filter boundaries, draw-stream match, teeth); suite
-  82 P / 9 F / 113 S vs 81/9/112 = **zero regressions**. `⚠` **The device tail
-  op's test has NEVER executed** (needs 0.4–1 GiB VRAM) — **K1+K2 parity is an
-  open debt** (D-22/D-24) and a precondition of the accept gate.
-- phase: **P2 IN FLIGHT** — stage 2 landed (above); stage 1 draft forward
-  `mwq1d681-8aff` still running (`opus-5`, CPU-only); stage 3 = graph/state +
-  decode-loop integration after it. **P0 gate PASSED** (P0b **SOUND**); P0c
-  **SKIPPED by user (D-17)**. Branch pushed to `origin/feat/dspine-spec-backend`.
-- **Micro-window idea (cheap first):** the tail op test needs only **0.4–1 GiB**.
-  Stopping **`a5000-5` (tts, ~1 GiB)** for ~2 min and restarting it clears the K1
-  debt without touching dgemma or basalt. Full window still needed later for the
-  NVFP4 gather path + DFlash2 baseline + A/B (those want GBs).
-- `⚠` **P2 window policy (user, 2026-11-22)**: code first, CPU-only; **one**
-  GPU window later takes `a5000-11` (dgemma) down for ALL device verification
-  (NVFP4 gather parity, sampled-tail **K1+K2** parity, real DFlash2 baseline,
-  then the A/B). Dgemma stays up until that window opens.
+- phase: **P2 IN FLIGHT** (stage 1 forward harness preserved `92bcb397`; stage 2
+  tail landed; stage 3 = engine forward + graph/state + decode-loop wiring
+  PENDING). **P0 gate PASSED** (P0b **SOUND**); P0c **SKIPPED by user (D-17)**.
+  Branch pushed to `origin/feat/dspine-spec-backend`.
+- P2 stage 2 tail: **MERGED** `9a562172` + binding fix `c462071c`. **K1+K2 BOTH
+  CLOSED ON DEVICE** (D-25 `mwpzha6z`-era run + D-28 `k1_proper_t10`): op test
+  4 cases / 0 skipped / exit 0 on GPU 1, **eager and graph-replayed**, batch-2
+  case, prod policy `T=0.9/min_p=0.05` **and** K1-proper `T=1.0 + top_k=20 (no
+  cut)`. Host-core tail tests green CPU-only; suite 82 P / 9 F / 113 S vs
+  81/9/112 = **zero regressions**.
+- P2 NVFP4 gather path: **SOUND** (D-27, `12501faf`) — device NVFP4 vs CPU dequant
+  of identical bytes is **BIT-EXACT** (`normalize_codes` 0 ulp, `serial_scores`
+  idx 240/240); `serial_tail` is format-invariant.
+- P2 artifact load path: **walked end-to-end for the first time** and it exposed
+  blockers one behind the other (kernels → gather → binding → config): binding
+  **FIXED** `c462071c` (declared-format bind, `{BF16,NVFP4}`, tg/tsv pair
+  enforced). `⚠` **OPEN: the config parser** rejects the recipe vocabulary
+  (`unknown member code_bridge_second_pass`, format-independent) ⇒ **neither real
+  artifact loads end-to-end yet**; in flight `mwq3m3kc-c280`.
+- `⚠` **dgemma window (main-agent decision, deviates from "bounce per task")**:
+  remaining device work is contiguous and P3 needs the slot anyway; repeated
+  24 GiB/66 GiB up-down is riskier than one bounded window. **a5000-11 stays down
+  through it — hard rule: device work idle >30 min or P3 abandoned ⇒ restore
+  immediately and record it.**
+- `⚠` **RAM is a live constraint**: the forward harness holds ~42 GiB RSS; the
+  guard refused a `a5000-11` restore at MemAvailable 39 GiB (needs 66 + 10). A
+  device window that loads the artifact must budget **RAM, not just VRAM**.
+  Swap is full (8/8 GiB) — build with `-j4`, never two heavy jobs at once.
 - `⚠` **Kernel-dev sampling standard = K1 (D-24)**: T=1.0, top_k 20, top_p 1.0,
-  min_p 0, fixed seed ⇒ bit-exact vs the C++ oracle. Prod T=0.9/min_p 0.05 is a
-  **composition** test (K2), and the **A/B is the only place T=0.9 is measured
-  for acceptance** (N>=3 repeats + a T=0 arm).
-- `⚠` **P2 GPU reality**: GPU 0 = 488 MiB free (prod), GPU 1 = 380 MiB free
-  (basalt 47.4 + dgemma 21.8 + tts). **No GPU work is possible without stopping
-  a5000-11 (dgemma)** — a user decision, not a main-agent move.
+  min_p 0, fixed seed ⇒ bit-exact vs the C++ oracle. Prod T=0.9/min_p 0.05 = K2
+  composition. **The A/B is the only place T=0.9 is measured for acceptance**
+  (N>=3 repeats + a T=0 arm).
+- `⚠` **P3 gate = 5 criteria (D-26)**: tail K1+K2 ✅ · NVFP4 gather ✅ · draft
+  forward from the real 1.3157 GiB artifact ⬜ · whole-round decode wired +
+  T=0 byte-exact ⬜ · **DSpine ≥ DFlash2 K7 on GPU 1 at T=0.9, N>=3** ⬜.
+  **2/5 green.**
 - done: plan; 4 reviews (self / verifier `mwpxt2ws` / D-14 drafter-swap /
   `mwpya6mp` coherence); spine verified (D-01 license, D-05 T=0.9, D-02 map,
   5090-fits, D-14 drafter-swap); fixes → **D-10..14**
@@ -434,6 +444,29 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **Also**: the running harness/op tests read the real artifact at **~42 GiB RSS**,
   which trips the fleet RAM guard — a device window that also loads the artifact
   must budget RAM, not just VRAM.
+
+- **D-2026-11-21-28** — **BINDING FIXED, K1-PROPER CLOSED, a THIRD blocker found.**
+  `70e0b288` (merged `c462071c`): `Binder::declared_format` + `Bindings::
+  direct_as_declared` ⇒ `codebook`/`tg`/`tsv` bind in **the format the manifest
+  declares**, accepted `{BF16, NVFP4}`, out-of-set refused naming both sides,
+  `tg.qtype == tsv.qtype` enforced **at bind**; `binder.cpp:49-53` untouched and
+  the BF16 path is the *identical* `parameter(name,shape,{},BF16)` call. Both real
+  artifacts probed at the manifest level: NVFP4 tables now bind, BF16 unchanged.
+  **K1-proper CLOSED** (`9a8fa621`): `k1_proper_t10` (**T=1.0, top_k=20 = no cut**)
+  appended last so all 7 existing fixture rows stay byte-identical; op test green
+  on GPU 1 (4 cases, 0 skipped, 2.2 s). **D-24's K1+K2 are both closed on device**,
+  eager **and** graph-replayed.
+  `⚠` **THIRD BLOCKER (pre-existing, format-independent)**: the artifact still
+  fails **before binding**, in the config parser —
+  `Qwen3.5 config: dspine config: unknown member code_bridge_second_pass`, identical
+  on BOTH artifacts ⇒ the converter emits a **wider `dspine` vocabulary** than our
+  allowlist accepts; the earlier note that "the BF16 artifact is loadable" was
+  **wrong at this HEAD**. In flight: `mwq3m3kc-c280` (extend the allowlist, keep
+  unknown members strict, prove parse→bind on both artifacts).
+  **Lesson (applies to the rest of P2/P3)**: every blocker fixed exposed the next
+  one *downstream* (kernels → gather tables → binding → config parser). **The
+  artifact load path had never been walked end-to-end before tonight.** Walk it in
+  one place, with one owner, before sizing any window off it.
 
 ## OBJECTIVE
 
