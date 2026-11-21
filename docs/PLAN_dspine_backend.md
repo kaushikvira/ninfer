@@ -38,7 +38,8 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 ## STATUS (cursor — update + commit at every gate)
 
 - P2 stage 2: **MERGED** `9a562172` (from `076e9cb4` host core, `55062599` device
-  op, `56335d5e` compile fixes). Host-core tail tests PASS CPU-only (8 groups
+  op, `56335d5e` compile fixes). **K1+K2 PARITY CLEARED on GPU 1** (D-25:
+  4 cases / 0 skipped / exit 0, eager **and** graph-captured, batch-2 case). Host-core tail tests PASS CPU-only (8 groups
   incl. greedy degeneracy, filter boundaries, draw-stream match, teeth); suite
   82 P / 9 F / 113 S vs 81/9/112 = **zero regressions**. `⚠` **The device tail
   op's test has NEVER executed** (needs 0.4–1 GiB VRAM) — **K1+K2 parity is an
@@ -351,6 +352,25 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   are T=0 on the stock tower (D-23) — they are comparable only to our T=0 arm,
   never to the A1 result. Supersedes D-22's "prod T=0.9 precondition" phrasing:
   the **parity debt is now K1+K2**, cleared in the GPU window.
+
+- **D-2026-11-21-25** — **SAMPLED-TAIL PARITY DEBT CLEARED (K1+K2) — on a REAL
+  GPU, first try.** `ninfer_dspine_serial_tail_op_test` on GPU 1 (device 1):
+  **4 cases, 0 skipped, exit 0** in 2.3 s. Cases exercised: `prod_t09_minp005`,
+  `greedy_t0`, `topk4_t10`, `topp08_t12`, `minp02_t07`, `lowtemp_t005`,
+  **`prod_batch2_drafts3`** — each run **twice: eager and CUDA-graph-captured**,
+  device output compared entry-by-entry against the C++ host core as the
+  specification. So in one run this closed:
+  (a) **K1** (T=1, filters off) and **K2** (prod T=0.9/min_p 0.05 + boundaries)
+  — the D-22 debt is paid, the sampled tail is no longer unverified;
+  (b) the **T→0 == greedy-pair** degenerate equivalence (`greedy_t0`);
+  (c) **D-23 gap #1 partially**: the op **is CUDA-graph capturable and replayable**
+  (the graph arm reproduces the eager arm bit-for-bit) — still unproven for the
+  whole round, which is stage 3's job;
+  (d) **D-23 gap #2 partially**: **batch 2** works (`prod_batch2_drafts3`).
+  `⚠` Scope of the claim, stated precisely: this is the **sampled tail op only**,
+  on harness vectors — **not** the whole proposal round, **not** throughput, and
+  **not** the NVFP4 gather tables (still unmeasured, D-20 → in flight
+  `mwq2d6vr-b9c4` on the same open window).
 
 ## OBJECTIVE
 
