@@ -906,6 +906,36 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   to `a5000-2`. **Recommendation carried into the MORNING BRIEF: do not open a P3 window
   until that arm exists and reports.**
 
+- **D-2026-11-21-43** — **ACCEPT WIRING LANDED (`d75cbc36`) — and it exposed a PERF RISK
+  THAT MAY DECIDE THE PROJECT.** The DSpine proposal tail now runs through the engine's
+  **decode loop** and hands drafts to **`speculative_accept_sparse_drafts`** — the accept
+  side is **one op, one call site** (`decision.cpp:81` gate widened to
+  `DFlash2 || Dspine`), so the existing accounting (`accepted = count − 1`, extent from
+  `host_ingress`) needs **no DSpine arm** ⇒ **the A/B against D-40's 2.998 compares the
+  same formula by construction, not by convention.** That was the design goal and it held.
+  New `execution/dspine.{h,cpp}` sequences the tail on engine ops only; three gates that
+  excluded a DSpine drafter opened (`masked_draft()`, `frames.cpp`'s `candidate_ids`/
+  `proposal_q` + five bridge streams, and `startup.cpp`, which also **gained the Dspine
+  validation arm it never had**).
+  `⚠` **NEW PERF FINDING — the sharpest risk yet**: **at production K=15 the tail's score
+  table is a K×K grid of head projections over 248,320 rows** ⇒ **thousands of
+  248320×5120 matvecs per round**. That is a structural per-round cost the a5000-2
+  timing must carry, and it is the kind of thing that turns "more accepted tokens" into
+  "slower decode". **Criterion ⑤ is now not just acceptance but acceptance *per unit
+  time* — D-40's 2.998 comes with a tok/s.** This deserves a dedicated measurement
+  before any lane window: **the score-table cost at K=15 vs K=7 is a first-order
+  question, and D-16's "DSpine is K-matched so it has headroom" assumed the extra
+  window was cheap.**
+  `⚠` **Still unproven, recorded**: (a) **no acceptance number** — the probe blocks in
+  `artifact::Reader`'s **manifest parse of the 26.8 GiB fused artifact** (>7 min
+  observed, one drive at 32 min on a contended GPU 1); that reader behaviour is itself a
+  finding for any large-artifact path; (b) **DFlash2 non-regression was NOT run** by the
+  author (its build dyndep was poisoned by a killed concurrent build) ⇒ **gate in flight
+  `mwqmfis4-1b5d`**, which is the only thing standing between this change and prod;
+  (c) the **5-layer draft walk is still probe-only** (not in the executor), so full
+  engine-loop DSpine generation is the lane's first piece; (d) **no CUDA graph profile
+  for DSpine** — it runs eager with three D2H/H2D layout crossings per round.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
