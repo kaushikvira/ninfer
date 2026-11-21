@@ -20,8 +20,10 @@
 //
 // T is both a context append (1) and a whole draft block (16, the release's block_size).
 //
-// Every line must read COMPILED: a REFUSED line is a proposal step that cannot be issued, and the
-// prod tower's own geometries are in this list, so a regression in the shape tables fails here too.
+// Every line must read COMPILED: a REFUSED line is a proposal step that cannot be issued. The
+// support is a registration list, so the block after it asks the same lookup for the prod tower's
+// and the co-resident DFlash2 drafter's nvfp4 geometries - a regression in the shape tables, in
+// either direction, fails here too.
 //
 // The 5090/SM120 build is the one that carries these tables (NINFER_TARGET=rtx5090); the shape
 // lookup itself is target-independent for the geometries named here.
@@ -112,5 +114,22 @@ int main() {
     for (const std::int32_t tokens : {1, 16})
         for (const auto& request : requests) probe(request, tokens);
     std::printf("dspine shape gate: %d lookups, %d refused\n", steps, failures);
+
+    // The shape tables are a registration list, so a removed instantiation is silent here: these
+    // are the prod tower's and the co-resident DFlash2 drafter's nvfp4 geometries, and the three
+    // new ones are additions to the same tables. Their lookups are the cheap proof that nothing
+    // that serves today stopped being compiled.
+    const std::vector<Request> resident{
+        {"linear", "dflash2 q/k/v packed (prod)", QType::NVFP4, 14336, 5120, {}},
+        {"linear", "dflash2 gate/up packed (prod)", QType::NVFP4, 16384, 5120, {}},
+        {"linear", "dflash2 attention output (prod)", QType::NVFP4, 5120, 6144, {}},
+        {"linear", "dflash2 mlp down (prod)", QType::NVFP4, 5120, 17408, {}},
+        {"linear_swiglu", "prod mlp gate/up", QType::NVFP4, 34816, 5120, {}},
+        {"linear_split", "prod q/k/v split", QType::NVFP4, 14336, 5120,
+         {6144, 1024, 6144, 1024}},
+        {"linear_split", "prod gate/up split", QType::NVFP4, 16384, 5120, {10240, 6144}},
+    };
+    for (const auto& request : resident) probe(request, 16);
+    std::printf("resident shape gate: %d lookups, %d refused\n", steps, failures);
     return failures == 0 ? 0 : 1;
 }

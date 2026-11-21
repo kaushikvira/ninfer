@@ -128,6 +128,30 @@ void add_multi_output_cases(Suite& suite) {
         add_profile(suite, profile, std::move(calls));
     }
     {
+        // The DSpine draft layer's packed attention query/key/value parent: 32 x 128 query rows
+        // and the two 8 x 128 key/value segments of one object, the same segmentation the Q8 split
+        // of this parent registers.
+        Profile profile{
+            5120,
+            {{QType::NVFP4, 6144, 339U, {.weight_scale = 0.125F, .input_scale = 3.5F}}},
+            {4096, 1024, 1024},
+            {{0, 4096, 128}, {4096, 1024, 128}, {5120, 1024, 128}},
+            a16,
+            1.0 / 256.0,
+            Binding::Nvfp4Inputs};
+        std::vector<Invocation> calls;
+        for (int t : {1, 2, 4, 8, 16, 20, 32, 33})
+            calls.push_back({.t = t, .input_seed = 341U, .omit_divisors = t == 1});
+        calls.push_back({.t = 4, .policy = Policy::AllowA8, .input_seed = 341U});
+        calls.push_back(
+            {.t = 4, .policy = Policy::AllowA8, .input_seed = 341U, .omit_divisors = true});
+        for (int t : {4, 17, 1023, 1024, 1025})
+            calls.push_back(
+                {.t = t, .policy = Policy::AllowA4, .input_seed = 341U, .sample_rows = 31});
+        calls.push_back({.t = 0, .workspace_intervals = true});
+        add_profile(suite, profile, std::move(calls));
+    }
+    {
         Profile profile{5120,
                         {{QType::FP8_E4M3FN_ROW_BF16, 14336, 349U}},
                         segments,
