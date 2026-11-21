@@ -37,14 +37,20 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- P2 stage 2: **partial** — host core + policy plumbing committed (`076e9cb4`),
-  device tail op preserved as WIP (`55062599`, unbuilt/unverified). **New kernel
-  in the prod path ⇒ parity debt (D-22) must clear in the GPU window.**
-- phase: **P2 IN FLIGHT** (stage 1 draft forward `mwq1d681-8aff` + stage 2
-  serial tail/accept `mwq1dnet-ca79`, both `opus-5`, CPU-only; stage 3 = graph/
-  state + decode-loop integration after they land). **P0 gate PASSED** (P0b
-  **SOUND**); P0c **SKIPPED by user (D-17)**. Branch pushed to
-  `origin/feat/dspine-spec-backend`.
+- P2 stage 2: **MERGED** `9a562172` (from `076e9cb4` host core, `55062599` device
+  op, `56335d5e` compile fixes). Host-core tail tests PASS CPU-only (8 groups
+  incl. greedy degeneracy, filter boundaries, draw-stream match, teeth); suite
+  82 P / 9 F / 113 S vs 81/9/112 = **zero regressions**. `⚠` **The device tail
+  op's test has NEVER executed** (needs 0.4–1 GiB VRAM) — **K1+K2 parity is an
+  open debt** (D-22/D-24) and a precondition of the accept gate.
+- phase: **P2 IN FLIGHT** — stage 2 landed (above); stage 1 draft forward
+  `mwq1d681-8aff` still running (`opus-5`, CPU-only); stage 3 = graph/state +
+  decode-loop integration after it. **P0 gate PASSED** (P0b **SOUND**); P0c
+  **SKIPPED by user (D-17)**. Branch pushed to `origin/feat/dspine-spec-backend`.
+- **Micro-window idea (cheap first):** the tail op test needs only **0.4–1 GiB**.
+  Stopping **`a5000-5` (tts, ~1 GiB)** for ~2 min and restarting it clears the K1
+  debt without touching dgemma or basalt. Full window still needed later for the
+  NVFP4 gather path + DFlash2 baseline + A/B (those want GBs).
 - `⚠` **P2 window policy (user, 2026-11-22)**: code first, CPU-only; **one**
   GPU window later takes `a5000-11` (dgemma) down for ALL device verification
   (NVFP4 gather parity, sampled-tail **K1+K2** parity, real DFlash2 baseline,
