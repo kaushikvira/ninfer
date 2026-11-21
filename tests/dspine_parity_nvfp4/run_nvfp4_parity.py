@@ -104,12 +104,26 @@ def flatten(want: np.ndarray) -> np.ndarray:
     return flat.astype(np.float32).view(np.uint32) if want.dtype == np.float32 else flat
 
 
-def score(rows, kind, op, case, output, want, got_path, band) -> dict:
+def anchor_columns(shape: tuple, width: int) -> np.ndarray:
+    """Flat (Fortran-order) indices of the anchor columns t == 0 of a [rows, columns] output.
+
+    Only those elements pass through the gather tables (normalize_codes_kernel takes the
+    anchor branch, kernels.cu), so the table path has to be scored on them alone: the rest of
+    the array is table-independent and only dilutes the measurement.
+    """
+    rows, columns = shape[0], shape[1]
+    flat = np.arange(columns * rows, dtype=np.int64).reshape(columns, rows).T
+    return flat[:, [column for column in range(columns) if column % width == 0]].ravel()
+
+
+def score(rows, kind, op, case, output, want, got_path, band, select=None) -> dict:  # noqa
     """Reference bits vs device bits, in storage ulps (bf16 uint16 / fp32 uint32 / int32)."""
     want_flat = flatten(want)
     element = {np.dtype(np.uint16): np.uint16, np.dtype(np.int32): np.int32,
                np.dtype(np.float32): np.uint32}[want.dtype]
     got = np.fromfile(got_path, dtype=element)
+    if select is not None:
+        want_flat, got = want_flat[select], got[select]
     row = {"kind": kind, "op": op, "case": case, "output": output,
            "n": int(want_flat.size), "band": band}
     if got.size != want_flat.size:
@@ -136,12 +150,14 @@ def score(rows, kind, op, case, output, want, got_path, band) -> dict:
     return row
 
 
-def device_vs_device(rows, kind, op, case, left, right, dtype, name) -> dict:
+def device_vs_device(rows, kind, op, case, left, right, dtype, name, select=None) -> dict:
     """(b) two device runs on the same vectors; only the table format differs."""
     element = {np.dtype(np.uint16): np.uint16, np.dtype(np.int32): np.int32,
                np.dtype(np.float32): np.uint32}[np.dtype(dtype)]
     dtype = np.dtype(dtype)
     a, b = np.fromfile(left, dtype=element), np.fromfile(right, dtype=element)
+    if select is not None:
+        a, b = a[select], b[select]
     row = {"kind": kind, "op": op, "case": case, "output": name, "n": int(a.size), "band": 0}
     if a.size != b.size:
         row.update(verdict="SIZE")
@@ -169,8 +185,10 @@ def head_rows_of(built: dict) -> np.ndarray:
     return num.bf16_round(decode_e4m3_bytes(head_bytes) * head_scales[:, None])
 
 
-def run_normalize_codes(case: Case, geo: dict, workdir: Path) -> list:
+def run_normalize_codes(case: Case, geo: dict, workdir: Path, rms_scale: float = 1.0) -> list:
+    """The codebook path has no rms term, so `rms_scale` is inert here (kept for one call shape)."""
     op = "normalize_codes"
+    assert rms_scale == 1.0, "normalize_codes has no rms term to scale"
     rows: list = []
     built = build_case(op, case, geo, "")
     codebook_bits = built["tables"]["codebook"]
@@ -187,22 +205,34 @@ def run_normalize_codes(case: Case, geo: dict, workdir: Path) -> list:
                      built["fp8"], {}, workdir / "nvfp4")
     bf = run_fixture(op, geo, case.eps, built["inputs"], {"codebook": codebook_bits}, {},
                      built["fp8"], {}, workdir / "bf16")
+    # The codebook is read only on the anchor columns, so every comparison is scored there.
+    anchors = anchor_columns((geo["code_size"], geo["width"] * geo["batch"]), geo["width"])
     for name, want in clean.outputs.items():
-        score(rows, "A-nvfp4-gather", op, case.name, name, want, nv[name], band_for(name))
+        score(rows, "A-nvfp4-gather", op, case.name, name, want, nv[name], band_for(name),
+              select=anchors)
     for name in clean.outputs:
         device_vs_device(rows, "B-bf16-vs-nvfp4", op, case.name, nv[name], bf[name],
-                         np.uint16, name)
+                         np.uint16, name, select=anchors)
     for mutant, kwargs in GATHER_MUTANTS.items():
         for name, want in expectation(nvfp4.dequant_bits(table, **kwargs)).outputs.items():
             score(rows, f"C-teeth:{mutant}", op, case.name, name, want, nv[name],
-                  band_for(name))
+                  band_for(name), select=anchors)
     return rows
 
 
-def run_serial_scores(case: Case, geo: dict, workdir: Path) -> list:
+def run_serial_scores(case: Case, geo: dict, workdir: Path, rms_scale: float = 1.0) -> list:
+    """One vector set. `rms_scale` weights the R-dim term (rms * m . tg), which is the one the
+    tg/tsv tables feed: the P0b vectors put it under a 5120-wide H-dim dot, and an argmax
+    under that regime is provably insensitive to a table defect (P0b's own
+    `serial_scores/rms_missing` weak mutant). The tg-dominant set is what gives this op teeth;
+    the same defects are seen at full strength through the score table in run_serial_tail.py.
+    """
     op = "serial_scores"
     rows: list = []
     built = build_case(op, case, geo, "")
+    if rms_scale != 1.0:
+        built["inputs"]["rms"] = (built["inputs"]["rms"].astype(np.float32)
+                                   * np.float32(rms_scale)).astype(np.float32)
     tg_bits, tsv_bits = built["tables"]["tg"], built["tables"]["tsv"]
     tg = nvfp4.encode_table(num.bf16_bits_to_f32(tg_bits).astype(np.float32))
     tsv = nvfp4.encode_table(num.bf16_bits_to_f32(tsv_bits).astype(np.float32))
@@ -263,14 +293,17 @@ def main() -> int:
     for op in [item for item in arguments.ops.split(",") if item]:
         if op not in RUNNERS:
             raise SystemExit(f"unknown op {op}; runners: {sorted(RUNNERS)}")
+        sets = [("", 1.0)] if op != "serial_scores" else [("", 1.0), (" tgdom", 1000.0)]
         for index in range(arguments.cases):
-            case = Case(f"{op}#{index}", arguments.seed + index, geo)
-            try:
-                rows.extend(RUNNERS[op](case, geo, work / f"{op}-{index}"))
-            except RuntimeError as error:
-                print(str(error), file=sys.stderr)
-                rows.append({"kind": "FIXTURE", "op": op, "case": case.name,
-                             "output": "-", "verdict": "FIXTURE-FAIL"})
+            for suffix, rms_scale in sets:
+                case = Case(f"{op}#{index}{suffix}", arguments.seed + index, geo)
+                try:
+                    rows.extend(RUNNERS[op](case, geo, work / f"{op}-{index}{suffix}",
+                                            rms_scale=rms_scale))
+                except RuntimeError as error:
+                    print(str(error), file=sys.stderr)
+                    rows.append({"kind": "FIXTURE", "op": op, "case": case.name,
+                                 "output": "-", "verdict": "FIXTURE-FAIL"})
 
     header = (f"{'kind':<24} {'op':<15} {'output':<12} {'n':>9} {'exact':>9} {'bad':>6} "
               f"{'max|ulp|':>8} {'p99':>5}  verdict")
@@ -289,8 +322,18 @@ def main() -> int:
     clean = [row for row in rows if row["kind"].startswith(("A-", "B-"))]
     bad = [row for row in clean if row["verdict"] not in ("BIT-EXACT", "EQUIVALENT-ORDER",
                                                           "DRIFT")]
+    weak_surface = [row for row in rows if row["kind"].startswith("C-teeth")
+                    and row["verdict"] in ("BIT-EXACT", "EQUIVALENT-ORDER")
+                    and "tgdom" not in row["case"]]
+    for row in weak_surface:
+        print(f"  note: argmax-only surface, tooth invisible on this vector set: "
+              f"{row['kind']} {row['case']}")
     teeth = [row for row in rows if row["kind"].startswith("C-teeth")]
-    weak = [row for row in teeth if row["verdict"] in ("BIT-EXACT", "EQUIVALENT-ORDER")]
+    # A tooth the *argmax-only* serial_scores surface cannot see is a documented weak mutant
+    # (P0b's rms_missing precedent), not a missing tooth: the same defect is caught on the
+    # tg-dominant set and, at full strength, through the score table in run_serial_tail.py.
+    weak = [row for row in teeth if row["verdict"] in ("BIT-EXACT", "EQUIVALENT-ORDER")
+            and not (row["op"] == "serial_scores" and "tgdom" not in row["case"])]
     print(f"\nclean rows {len(clean)} (unexpected verdicts {len(bad)}) | "
           f"teeth rows {len(teeth)} (not diverging {len(weak)})")
     for row in bad:
