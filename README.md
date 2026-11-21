@@ -270,6 +270,48 @@ docker run --rm --gpus '"device=0"' --publish 8080:8080 \
   --host 0.0.0.0 --max-context 8192 --kv-dtype fp8
 ```
 
+## DSpine draft head
+
+`--spec dspine` reads a `dspine` component out of the artifact.  The DSpine
+release publishes the draft tower only, so the two vocabulary-wide refinement
+tables (`dspine/bridge/tg`, `dspine/bridge/tsv`) must be derived from the output
+head of the tower they serve; they are therefore built by a script, not by
+`-m tools.convert`:
+
+```bash
+# 1. fuse a DSpine head onto a tower (TG/TSV come from that tower's lm_head)
+python3 scripts/attach_dspine_head.py \
+  /models/qwen3_8_27b_swift15_v3.ninfer \
+  /models/dspine-b16-260a6c23 \
+  /models/qwen3_8_27b_swift15_v3_dspine.ninfer \
+  --report /models/attach-report.json
+#    --tables-nvfp4 stores codebook/TG/TSV as NVFP4 (~870 MiB smaller drafter)
+#    --device cpu is the fallback when no CUDA device is present
+
+# 2. prove the result: object inventory + which head the tables came from
+python3 scripts/dspine_inventory.py \
+  /models/qwen3_8_27b_swift15_v3_dspine.ninfer \
+  --objects --evidence --head-artifact /models/other_tower.ninfer \
+  --derive-tables /models/qwen3_8_27b_swift15_v3.ninfer \
+  --draft-dir /models/dspine-b16-260a6c23 --device cpu
+
+# 3. reuse the tower-specific bytes for another build of the same tower
+python3 scripts/extract_dspine_draft.py \
+  /models/qwen3_8_27b_swift15_v3_dspine.ninfer /models/dspine-draft.suffix
+python3 scripts/fuse_dspine_draft.py \
+  /models/qwen3_8_27b_swift15_v3.ninfer /models/dspine-draft.suffix \
+  /models/qwen3_8_27b_swift15_v3_dspine_fused.ninfer
+```
+
+The draft source contract lives in
+[`tools/convert/qwen3_8_27b/dspine_recipe.py`](tools/convert/qwen3_8_27b/dspine_recipe.py)
+(the DSpine counterpart of [`tools/convert/dflash.py`](tools/convert/dflash.py)),
+and the weight-only quantizer it needs is
+[`tools/convert/quantization/nvfp4_maxabs.py`](tools/convert/quantization/nvfp4_maxabs.py).
+`scripts/attach_dspine_head.py` records the release revision, the encoder
+profile, and the SHA-256 of the output-head bytes it consumed under the artifact
+`provenance`, so a fused artifact states which tower it was tailored to.
+
 ## Documentation
 
 - [Deployment configurations](examples/configs/) and [startup parameters](docs/startup-configuration.md)
