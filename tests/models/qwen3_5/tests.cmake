@@ -19,6 +19,17 @@ ninfer_add_test(ninfer_qwen3_5_dspine_real_test
 set_tests_properties(ninfer_qwen3_5_dspine_real_test PROPERTIES
   SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine")
 
+# The DSpine draft forward against a real V3 drafter artifact, on the device: the load footprint,
+# the linear geometries the proposal path names, the proposal steps walked on the real weights,
+# the supported bridge chain, and the sampled tail composed onto the target head. It materializes
+# ~4 GiB on one card, so it is opt-in by NINFER_TEST_ARTIFACT and NINFER_TEST_DEVICE (D-29: a
+# device probe never guesses a card) and skips, exit 77, without either.
+ninfer_add_test(ninfer_qwen3_5_dspine_forward_real_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_forward_real.cpp"
+  LIBRARIES ninfer_model_loading ninfer_ops)
+set_tests_properties(ninfer_qwen3_5_dspine_forward_real_test PROPERTIES
+  SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 1800)
+
 ninfer_add_test(ninfer_qwen3_5_runtime_mechanisms_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_runtime_mechanisms.cpp"
   LIBRARIES ninfer_engine ninfer_core)
