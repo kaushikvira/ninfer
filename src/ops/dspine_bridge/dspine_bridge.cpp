@@ -137,6 +137,36 @@ void dspine_serial_scores(const Tensor& cand, const Tensor& raw, const Tensor& r
                                         tg, tsv, width, idx, stream);
 }
 
+void dspine_serial_tail(const Tensor& table, const Tensor& cand,
+                        const ops::SamplingConfig* configs, const Tensor& positions,
+                        Tensor& drafts, Tensor& proposal_q, Tensor& idx, cudaStream_t stream) {
+    require(cand.dtype == DType::I32 && cand.is_contiguous() && cand.ne[2] == 16,
+            "dspine serial_tail: cand must be I32 [batch, drafts, 16]");
+    const std::int32_t batch   = cand.ne[0];
+    const std::int32_t ndrafts = cand.ne[1];
+    require(batch > 0 && ndrafts > 0 && ndrafts <= 15,
+            "dspine serial_tail: drafts must be in [1,15] and batch positive");
+    require(table.dtype == DType::FP32 && table.is_contiguous() &&
+                table.ne[0] == batch && table.ne[1] == 16 && table.ne[2] == 16 &&
+                table.ne[3] == ndrafts,
+            "dspine serial_tail: table must be FP32 [batch, 16 (cand), 16 (sender), drafts]");
+    require(configs != nullptr, "dspine serial_tail: sampling configs are required");
+    require(positions.dtype == DType::I32 && positions.is_contiguous() &&
+                positions.ne[0] == batch,
+            "dspine serial_tail: positions must be I32 [batch]");
+    require(drafts.dtype == DType::I32 && drafts.is_contiguous() && drafts.ne[0] == batch &&
+                drafts.ne[1] == ndrafts,
+            "dspine serial_tail: drafts must be I32 [batch, drafts]");
+    require(proposal_q.dtype == DType::FP32 && proposal_q.is_contiguous() &&
+                proposal_q.ne[0] == batch && proposal_q.ne[1] == ndrafts && proposal_q.ne[2] == 16,
+            "dspine serial_tail: proposal_q must be FP32 [batch, drafts, 16]");
+    require(idx.dtype == DType::I32 && idx.is_contiguous() && idx.ne[0] == batch &&
+                idx.ne[1] == ndrafts && idx.ne[2] == 16,
+            "dspine serial_tail: idx must be I32 [batch, drafts, 16]");
+    detail::dspine_serial_tail_launch(table, cand, configs, positions, drafts, proposal_q, idx,
+                                      stream);
+}
+
 void dspine_serial_chain(const Tensor& cand, const Tensor& idx, Tensor& drafts,
                          cudaStream_t stream) {
     require(cand.dtype == DType::I32 && cand.is_contiguous() && cand.ne[0] == 16,
