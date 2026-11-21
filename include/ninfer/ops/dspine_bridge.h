@@ -2,6 +2,7 @@
 
 #include "core/tensor.h"
 #include "core/weight.h"
+#include "ninfer/ops/sampling.h"
 
 #include <cuda_runtime.h>
 
@@ -59,6 +60,34 @@ void dspine_serial_scores(const Tensor& cand, const Tensor& raw, const Tensor& r
                           const Tensor& packed_q, const Tensor& anchors, const Tensor& norm_w,
                           const Tensor& gate_bias, const Weight& head, const Weight& tg,
                           const Weight& tsv, std::int32_t width, Tensor& idx, cudaStream_t stream);
+
+/**
+ * Refinement-tail selection under the live request policy (the stochastic sibling of
+ * dspine_serial_scores + dspine_serial_chain, which are the greedy pair).
+ *
+ * For each slot i, every sender j has its own row of kTopK candidate scores. The row is turned
+ * into q = filter(softmax(score * inv_temp)) with the request's joint top-k / strict-prefix
+ * top-p / min-p (propose.py:73-90), one candidate is drawn from q with the counter-based stream
+ * keyed on (configs[b].seed, positions[b], kSamplePurposeDFlash2Proposal, i), and the walk then
+ * advances sender = drawn index (propose.py:114-152). drafts[i] is the walked candidate id.
+ *
+ * configs is Device SamplingConfig[batch]. temperature<=0 selects the greedy degenerate: the
+ * argmax chain with a one-hot q, i.e. exactly dspine_serial_scores + dspine_serial_chain.
+ * Presence/frequency penalties and token masks are NOT expressible by the reference tail, so a
+ * caller must reject such a request before launching (models/common/dspine/
+ * dspine_serial_tail.h does that at plan time); this Op reads neither field.
+ *
+ * Layouts are first-axis-fastest: table FP32 [batch, kTopK, kTopK, drafts] (candidate, sender,
+ * slot), cand I32 [batch, drafts, kTopK], positions I32 [batch], drafts I32 [batch, drafts],
+ * proposal_q FP32 [batch, drafts, kTopK] (the walked sender's row - the distribution that
+ * produced that draft, which speculative_accept_sparse_drafts verifies against), idx I32
+ * [batch, drafts, kTopK] (per sender, the twin of dspine_serial_scores' idx). scores must be
+ * finite and each q row non-empty; no hidden allocation, no host synchronization, and the
+ * result is a pure function of its inputs, so the Op is CUDA-graph capturable and replayable.
+ */
+void dspine_serial_tail(const Tensor& table, const Tensor& cand,
+                        const ops::SamplingConfig* configs, const Tensor& positions, Tensor& drafts,
+                        Tensor& proposal_q, Tensor& idx, cudaStream_t stream);
 
 // Walks the sender chain: j = idx[0, 0]; drafts[i] = cand[i, j]; j = idx[i+1, j].
 // cand/idx [16, drafts, batch] I32 -> drafts [drafts, batch] I32.

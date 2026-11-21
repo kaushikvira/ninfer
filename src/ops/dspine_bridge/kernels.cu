@@ -6,6 +6,8 @@
 #include "core/weight.h"
 #include "ops/common/cuda/reduce.cuh"
 #include "ops/common/quant/nvfp4.cuh"
+#include "ninfer/ops/sampling.h"
+#include "ops/sampling/kernels/random.cuh"
 #include "ops/dspine_bridge/launch.h"
 
 #include <cuda_bf16.h>
@@ -289,6 +291,144 @@ __launch_bounds__(32) __global__ void serial_chain_kernel(const std::int32_t* ca
     }
 }
 
+// --- serial tail (policy sampling) -------------------------------------------------------
+//
+// Mirror of models/common/dspine/dspine_serial_tail.cpp, which is the executable
+// specification and the CPU-tested oracle. One block per batch row: each of the first kTopK
+// threads owns one sender and filters that sender's row; thread 0 walks the chain serially.
+// No allocation, no sync with the host, no dependence on the compact row index - capturable.
+
+// propose.py:73-90. Rank on the distribution (lower slot wins ties), keep while
+// (rank < top_k) and (strict prefix mass <= top_p) and (p >= min_p * max p), renormalise.
+__device__ __forceinline__ void tail_filter(const float* scores, const ops::SamplingConfig& config,
+                                            float* q, bool* keep) {
+    if (!(config.temperature > 0.0f)) {
+        int best = 0;
+        for (int k = 1; k < kTopK; ++k) {
+            if (scores[k] > scores[best]) { best = k; }
+        }
+        for (int k = 0; k < kTopK; ++k) {
+            keep[k] = k == best;
+            q[k]    = keep[k] ? 1.0f : 0.0f;
+        }
+        return;
+    }
+    const float inv_temp = 1.0f / config.temperature;
+    float peak           = scores[0] * inv_temp;
+    for (int k = 1; k < kTopK; ++k) { peak = fmaxf(peak, scores[k] * inv_temp); }
+    float p[kTopK];
+    float total = 0.0f;
+    for (int k = 0; k < kTopK; ++k) {
+        p[k] = expf(scores[k] * inv_temp - peak);
+        total += p[k];
+    }
+    for (int k = 0; k < kTopK; ++k) { p[k] /= total; }
+    float maxima = p[0];
+    for (int k = 1; k < kTopK; ++k) { maxima = fmaxf(maxima, p[k]); }
+    float kept_mass = 0.0f;
+    for (int k = 0; k < kTopK; ++k) {
+        int rank          = 0;
+        float mass_before = 0.0f;
+        for (int j = 0; j < kTopK; ++j) {
+            const bool is_ahead = p[j] > p[k] || (p[j] == p[k] && j < k);
+            if (!is_ahead) { continue; }
+            ++rank;
+            mass_before += p[j];
+        }
+        bool keep_slot = rank < config.top_k && mass_before <= config.top_p;
+        if (config.min_p > 0.0f) { keep_slot = keep_slot && p[k] >= config.min_p * maxima; }
+        keep[k] = keep_slot;
+        q[k]    = keep_slot ? p[k] : 0.0f;
+        kept_mass += q[k];
+    }
+    for (int k = 0; k < kTopK; ++k) { q[k] /= kept_mass; }
+}
+
+// propose.py:150-152: choice = #{cdf <= u * cdf[last]}, clamped to the last kept slot.
+__device__ __forceinline__ int tail_draw(const float* q, const bool* keep, float u) {
+    float cdf[kTopK];
+    float running = 0.0f;
+    for (int k = 0; k < kTopK; ++k) {
+        running += q[k];
+        cdf[k] = running;
+    }
+    const float threshold = u * cdf[kTopK - 1];
+    int choice            = 0;
+    for (int k = 0; k < kTopK; ++k) {
+        if (cdf[k] <= threshold) { ++choice; }
+    }
+    int last = 0;
+    for (int k = 0; k < kTopK; ++k) {
+        if (keep[k]) { last = k; }
+    }
+    return choice < last ? choice : last;
+}
+
+// Layouts (first axis fastest, as everywhere in this file):
+//   table   FP32 [batch, kTopK(cand), kTopK(sender), drafts]
+//   cand    I32  [batch, drafts, kTopK]
+//   drafts  I32  [batch, drafts]
+//   q_out   FP32 [batch, drafts, kTopK]  (the walked sender's row)
+//   idx_out I32  [batch, drafts, kTopK]  (per sender)
+__launch_bounds__(32) __global__ void serial_tail_kernel(
+    const float* table, const std::int32_t* cand, const ops::SamplingConfig* configs,
+    const std::int32_t* positions, std::int32_t* drafts_out, float* q_out, std::int32_t* idx_out,
+    std::int32_t drafts, std::int32_t batch) {
+    const int b = blockIdx.x;
+    if (b >= batch) { return; }
+    const ops::SamplingConfig config = configs[b];
+
+    __shared__ float q_shared[kTopK * kTopK];
+    __shared__ int idx_shared[kTopK];
+    __shared__ int sender_shared;
+    if (threadIdx.x == 0) { sender_shared = 0; }
+    __syncthreads();
+
+    for (int i = 0; i < drafts; ++i) {
+        const int slot = threadIdx.x;
+        if (slot < kTopK) {
+            float scores[kTopK];
+            for (int k = 0; k < kTopK; ++k) {
+                scores[k] = table[b + batch * (k + kTopK * (slot + kTopK * i))];
+            }
+            float q[kTopK];
+            bool keep[kTopK];
+            tail_filter(scores, config, q, keep);
+            int index = 0;
+            if (!(config.temperature > 0.0f)) {
+                for (int k = 1; k < kTopK; ++k) {
+                    if (keep[k]) { index = k; }
+                }
+            } else {
+                const float u =
+                    // Same purpose the host core uses (models/common/dspine/
+                    // dspine_serial_tail.h kSerialTailPurpose == this enum value); the GPU test
+                    // asserts the two agree.
+                    sampling_detail::sampling_uniform(config.seed, positions[b],
+                                                      kSamplePurposeDFlash2Proposal,
+                                                      static_cast<unsigned int>(i));
+                index = tail_draw(q, keep, u);
+            }
+            for (int k = 0; k < kTopK; ++k) { q_shared[slot * kTopK + k] = q[k]; }
+            idx_shared[slot] = index;
+        }
+        __syncthreads();
+        if (threadIdx.x == 0) {
+            const int sender = sender_shared;
+            const int choice = idx_shared[sender];
+            drafts_out[b + batch * i] = cand[b + batch * (i + drafts * choice)];
+            for (int k = 0; k < kTopK; ++k) {
+                q_out[b + batch * (i + drafts * k)] = q_shared[sender * kTopK + k];
+            }
+            sender_shared = choice;
+        }
+        for (int sender = threadIdx.x; sender < kTopK; sender += blockDim.x) {
+            idx_out[b + batch * (i + drafts * sender)] = idx_shared[sender];
+        }
+        __syncthreads();
+    }
+}
+
 } // namespace
 
 namespace detail {
@@ -419,6 +559,18 @@ void dspine_serial_scores_launch(const Tensor& cand, const Tensor& raw, const Te
                 tg_ref, tsv_ref, hidden, rank, width, drafts, batch,
                 static_cast<std::int32_t*>(idx.data));
     }
+}
+
+void dspine_serial_tail_launch(const Tensor& table, const Tensor& cand,
+                               const ops::SamplingConfig* configs, const Tensor& positions,
+                               Tensor& drafts, Tensor& proposal_q, Tensor& idx,
+                               cudaStream_t stream) {
+    const std::int32_t batch = drafts.ne[0];
+    serial_tail_kernel<<<static_cast<unsigned>(batch), 32, 0, stream>>>(
+        static_cast<const float*>(table.data), static_cast<const std::int32_t*>(cand.data),
+        configs, static_cast<const std::int32_t*>(positions.data),
+        static_cast<std::int32_t*>(drafts.data), static_cast<float*>(proposal_q.data),
+        static_cast<std::int32_t*>(idx.data), drafts.ne[1], batch);
 }
 
 void dspine_serial_chain_launch(const Tensor& cand, const Tensor& idx, Tensor& drafts,
