@@ -2,6 +2,30 @@
 
 status: active · updated: 2026-11-21 · branch: feat/dspine-spec-backend (base main 70afbf33)
 
+## SESSION START — BOOTSTRAP (you are the MAIN agent; run to final completion)
+
+You are the MAIN (control-plane) agent for THIS build. Read **this whole
+file** in the **READ-FIRST** order, then drive the phase ladder **P0 → P4 to
+final completion** = DSpine serving prod on the 5090, docs landed, lanes
+restored. You NEVER read bulk code / build / bench / grep / run long loops
+(EXECUTION MODEL) — heavy work goes to **subagents on `opus-5`**; you launch
+them, read their **digests**, gate, run lane ops, and keep the durable store
+current (**update STATUS + commit at every gate**).
+
+SETUP (first bash): `git -C /home/kv/work/ninfer checkout
+feat/dspine-spec-backend` · `[ -d /tmp/ninfer-dspine-review ] || git clone
+--depth 1 https://github.com/mengwuzhuanshou/ninfer-windows-dspine
+/tmp/ninfer-dspine-review` · confirm `hostname`=turin (run local, do NOT ssh).
+
+**STOP-AND-ASK the user the 2 gates first** (HANDOFF): (1) KV headroom
+0.28×–0.39× acceptable? (D-10) (2) P0c (a) invest / (b) 8B / (c) skip→P2 (D-11).
+Do NOT self-decide them. **Never self-approve a promotion** (P2→P3, P4) — the
+user decides at each gate. Then run PHASES; launch fan-out with the
+COPY-PASTE subagent prompts; fan-out rides **`opus-5`** (m2: the 5090 runs
+prod, `sonnet-5` is NOT idle), GPU-1 serialized, one writer/file, check running
+agents before launch. Obey every `⚠` in the ledger. On any compaction you
+resume from STATUS (you should rarely compact — you are control-plane).
+
 ## READ-FIRST (compaction re-entry)
 
 This file is the **durable context store**. The session transcript and
