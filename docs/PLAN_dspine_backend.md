@@ -37,10 +37,15 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- phase: **P1 COMPLETE — P2 next** (draft forward + serial tail + accept +
-  state/graph, then the V3-native A/B = the accept gate). **P0 gate PASSED**
-  (P0b **SOUND**); P0c **SKIPPED by user (D-17)**. Branch `feat/dspine-spec-backend`
-  = 8 commits ahead of `main`, **unpushed**.
+- phase: **P2 IN FLIGHT** (stage 1 draft forward `mwq1d681-8aff` + stage 2
+  serial tail/accept `mwq1dnet-ca79`, both `opus-5`, CPU-only; stage 3 = graph/
+  state + decode-loop integration after they land). **P0 gate PASSED** (P0b
+  **SOUND**); P0c **SKIPPED by user (D-17)**. Branch pushed to
+  `origin/feat/dspine-spec-backend`.
+- `⚠` **P2 window policy (user, 2026-11-22)**: code first, CPU-only; **one**
+  GPU window later takes `a5000-11` (dgemma) down for ALL device verification
+  (NVFP4 gather parity, real DFlash2 baseline, then the A/B). Dgemma stays up
+  until that window opens.
 - `⚠` **P2 GPU reality**: GPU 0 = 488 MiB free (prod), GPU 1 = 380 MiB free
   (basalt 47.4 + dgemma 21.8 + tts). **No GPU work is possible without stopping
   a5000-11 (dgemma)** — a user decision, not a main-agent move.
