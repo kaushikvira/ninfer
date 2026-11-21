@@ -1,0 +1,4 @@
+# Build artifacts (rebuilt by fixture/build.sh)
+fixture/dspine_nvfp4_fixture
+__pycache__/
+*.pyc
