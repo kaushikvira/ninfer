@@ -21,6 +21,12 @@ No kernel was edited. The kernels are the suspects; Tencent's reference is the a
 | `dspine_serial_scores` — `tgdom` (`rms`×1000, so the ranking term is the one the tables feed) | same | **BIT-EXACT** idx, 240/240, 2/2 cases | 27/240 and 25/240 idx flips | **4/4 DIVERGENT** (57–229 idx) |
 | `dspine_serial_tail` | (no Weight — the scores table) | **format-invariant**: identical table in ⇒ byte-identical drafts/idx/proposal_q (3/3) | drift: 1, 6, 8 of 15 drafts; 24–34 of 240 idx; 224/240 of `proposal_q` | 4/4 mutants move the draws (6–14 of 15 drafts, 40–193 of 240 idx) ⇒ **teeth on this path** |
 
+Reading the drift column: a bf16 ulp distance of ~16 000 is the signature of *one side being
+zero* (the raw-bit metric spans ~256 steps per octave from zero to ≈24), i.e. NVFP4 quantizing
+a small table entry to 0. On a P0b-shaped codebook `[1024, 1024]` the converter's profile
+zeroes 18.0 % of the entries at a relative-Frobenius error of 0.095 — the 4-bit trade D-20
+accepted for −0.85 GiB of drafter.
+
 **Gather path: SOUND.** The three table-consuming entry points dequantize NVFP4 rows exactly
 as the registered format says (E2M1 nibble × E4M3 scale ÷ divisor, rounded to BF16 once,
 `nvfp4_scale_byte_offset` addressing), bit for bit, on the anchor rows, on the tg/tsv
