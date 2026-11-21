@@ -6,7 +6,6 @@
 #include "core/weight.h"
 #include "ops/common/cuda/reduce.cuh"
 #include "ops/common/numeric/convert.cuh"
-#include "ops/common/quant/integer.cuh"
 #include "ops/common/quant/nvfp4.cuh"
 #include "ninfer/ops/sampling.h"
 #include "ops/sampling/kernels/random.cuh"
