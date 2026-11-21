@@ -108,14 +108,54 @@ struct ProposalParameters {
     std::uint32_t rows = 0;
 };
 
-// The DSpine streams the proposal TAIL (execution::dspine_propose_tail) names by weight: the
-// final norm and the code bridge's gate bias it hands `dspine_serial_scores`, and the bridge's
-// two serial tables, tg [vocabulary, rank] and tsv [vocabulary, 2 rank]. They are the drafter's
-// own materialized objects: the tail gathers them by candidate id inside its kernel, so no copy
-// of a table is taken and no second representation exists (D-31, D-35, D-37).
-struct DspineTailParameters {
+// One DSpine draft layer, in the form the executor's walk runs it in. The drafter's projections
+// are bound APART over one packed object (models/common/dspine/weights.h: the shipped manifests
+// name `attention/query|key|value` and `mlp/gate|up` as ranges of one object, and the two context
+// projections alias the K and V ranges), so the walk owns no fused copy: it issues the split
+// family over `query_key_value` (the packed parent) for the block's Q/K/V AND for the context
+// K/V, dropping the rows it does not need. That is the same packed-parent split the DFlash2 draft
+// path runs (execution/draft.cpp:391), and the DSpine probe's, and it is the only compiled route
+// to those bytes at this artifact's geometries (D-35).
+struct DspineBlockParameters {
+    Tensor input_norm, post_attention_norm;
+    LinearParameters query_key_value;
+    Tensor query_norm, key_norm;
+    LinearParameters output;
+    DenseParameters mlp;
+};
+
+// The code bridge, as the walk runs it: per-layer read and write slices out of the two STACKED
+// bridge objects (layer `i` of [layers, code, hidden] / [layers, hidden, rank] is one row range of
+// the one materialized object, never a copy), the three [rank, code] gate projections over the
+// codes, the gate bias, and the codebook the anchor rows are drawn from.
+struct DspineBridgeParameters {
+    Weight codebook;
+    std::vector<Weight> read;         // [layers]: layer 0..L-2 slice the stacked early-read object
+    std::vector<Weight> write;        // [layers]: slices of the stacked feature-write object
+    LinearParameters gate, predecessor_gate, prev;
+    Tensor gate_bias;
+};
+
+// The DSpine streams a proposal round names by weight. The TAIL half (execution::
+// dspine_propose_tail) is the final norm, the bridge's gate bias, and the bridge's two serial
+// tables, tg [vocabulary, rank] and tsv [vocabulary, 2 rank]; the WALK half (execution::
+// dspine_propose) adds the target-tap feature projection, the context norm, the five draft
+// layers, the code bridge, and the tower's own token embedding and output head.
+//
+// They are the drafter's own materialized objects: the tail gathers tg/tsv/the head by candidate
+// id inside its kernel and the walk reads the packed parents in place, so no copy of a table is
+// taken and no second representation exists (D-31, D-35, D-37). The two objects the walk shares
+// with the tower - the token embedding and the output head - are the tower's, aliased, not
+// duplicated.
+struct DspineParameters {
     Tensor final_norm, gate_bias;
     Weight tg, tsv;
+    // The walk half: empty for an artifact that carries no drafter layers.
+    LinearParameters feature_projection;
+    Tensor context_norm;
+    std::vector<DspineBlockParameters> layers;
+    DspineBridgeParameters bridge;
+    Weight token_embedding;
 };
 
 // Cold native preparation for the fixed model implementation. This owner is stable before
@@ -135,7 +175,7 @@ public:
     std::optional<MtpParameters> mtp;
     std::optional<qwen::VisionParameters> vision;
     std::optional<DraftParameters> draft;
-    std::optional<DspineTailParameters> dspine;
+    std::optional<DspineParameters> dspine;
     std::optional<ProposalParameters> proposal;
 };
 

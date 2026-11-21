@@ -177,6 +177,33 @@ public:
         return {tensor(w.base_kernel), linear(w.kernel_projection)};
     }
 
+    // One matrix of a STACKED parameter: layer `index`'s [rows, columns] row range of the one
+    // materialized [depth, rows, columns] object. The DSpine bridge's per-layer read and write
+    // weights are stacked this way in the shipped artifacts, and a slice of the materialized
+    // object is the only form that takes no copy: the same construction a weight bank uses for
+    // one expert's matrix (core/weight_bank.cpp:matrix_weight).
+    Weight stacked(WeightId id, std::uint64_t index, std::uint64_t rows,
+                    std::uint64_t columns) const {
+        const auto& bound = model_.weight(id);
+        return with_context(bound.name, [&] {
+            const auto& view = bound.view;
+            if (view.shape.size() != 3 || view.parts.size() != 1) {
+                throw std::invalid_argument(
+                    "a stacked bridge weight is one contiguous [depth, rows, columns] object");
+            }
+            const auto* parent = view.parts.front().parent;
+            if (parent == nullptr || parent->data == nullptr) {
+                throw std::invalid_argument("its stacked object is not resident on the device");
+            }
+            const auto begin = index * rows * columns;
+            if (view.shape[0] <= index || begin + rows * columns > view.parts.front().end) {
+                throw std::invalid_argument("the requested layer leaves its stacked object");
+            }
+            return native_weight({{rows, columns}, {{parent, begin, begin + rows * columns}}},
+                                 1.0F);
+        });
+    }
+
     DraftParameters draft(const dflash::Weights& w) const {
         DraftParameters out;
         out.feature_projection = linear(w.feature_projection);
@@ -225,6 +252,88 @@ public:
         return out;
     }
 
+    // The DSpine drafter, in the form the executor's proposal round runs it in. The tail's four
+    // streams (final norm, gate bias, tg, tsv) are what execution::dspine_propose_tail names; the
+    // WALK half - the target-tap feature projection, the context norm, the five draft layers and
+    // the code bridge - is what execution::dspine_propose walks, ported from the probe that walks
+    // the same objects (tests/models/qwen3_5/test_dspine_forward_real.cpp).
+    //
+    // Nothing here copies a weight. A layer of a STACKED bridge object is one row range of the
+    // one materialized object (`stacked` below, the core/weight_bank.cpp:matrix_weight form), and
+    // a packed Q/K/V group is prepared as the split family's packed parent exactly as the DFlash2
+    // draft arm above prepares its own. The token embedding is the tower's, aliased: the drafter
+    // carries no copy of it (D-37), and the proposal head is `text.output_head`, which the round
+    // reads through the tail's own view.
+    DspineParameters dspine(const dspine::Weights& w) const {
+        DspineParameters out;
+        out.final_norm        = tensor(w.final_norm);
+        out.gate_bias         = tensor(w.bridge.gate_bias);
+        out.tg                = native_weight(model_.weight(w.bridge.tg).view);
+        out.tsv               = native_weight(model_.weight(w.bridge.tsv).view);
+        out.feature_projection = linear(w.feature_projection);
+        out.context_norm       = tensor(w.context_norm);
+        // The drafter embeds its block with the TOWER's own token embedding; the definition
+        // aliases the id (qwen3_5/definition.cpp:98), so this names the tower's one materialized
+        // object and the drafter carries no copy of it (D-37).
+        out.token_embedding = native_weight(model_.weight(w.token_embedding).view);
+        out.bridge.codebook = native_weight(model_.weight(w.bridge.codebook).view);
+        out.bridge.gate             = linear(w.bridge.gate);
+        out.bridge.predecessor_gate = linear(w.bridge.predecessor_gate);
+        out.bridge.prev             = linear(w.bridge.prev);
+
+        const auto layers = std::uint64_t(w.layers.size());
+        const auto read   = model_.weight(w.bridge.read_weight).view.shape;          // [code, h]
+        const auto write  = model_.weight(w.bridge.feature_write_weights).view.shape; // [L, h, r]
+        if (write[0] != layers || read.size() != 2 || write.size() != 3) {
+            throw std::invalid_argument("the DSpine bridge's stacked objects are outside the "
+                                        "[layers, code, hidden] / [layers, hidden, rank] form");
+        }
+        // Layer i reads through row i of the one `early_read_weights` object, and the LAST
+        // layer through the artifact's own `read_weight` - which is exactly why
+        // models/common/dspine/weights.cpp binds that one [layers-1, code, hidden]: the vector
+        // is indexed by layer, and every entry is one row range of an object that was
+        // materialized once.
+        for (std::size_t layer = 0; layer + 1 < layers; ++layer)
+            out.bridge.read.push_back(
+                stacked(w.bridge.early_read_weights, layer, read[0], read[1]));
+        out.bridge.read.push_back(linear(w.bridge.read_weight).weight);
+        for (std::size_t layer = 0; layer < layers; ++layer)
+            out.bridge.write.push_back(
+                stacked(w.bridge.feature_write_weights, layer, write[2], write[1]));
+
+        out.layers.reserve(w.layers.size());
+        for (std::size_t i = 0; i < w.layers.size(); ++i) {
+            out.layers.push_back(with_context(
+                std::string(profile_.options.speculative_component()) + "/layers/"
+                    + std::to_string(i),
+                [&] {
+                    const auto& layer = w.layers[i];
+                    const auto& a     = layer.attention;
+                    DspineBlockParameters block;
+                    block.input_norm          = tensor(layer.input_norm);
+                    block.post_attention_norm = tensor(layer.post_attention_norm);
+                    // One packed object carries the block's Q, K and V ranges, and the two
+                    // context projections alias the K and V ranges (weights.cpp binds them with
+                    // require_shared_binding), so the walk reaches every one of them - the block
+                    // split AND the context split - through this one packed parent.
+                    const std::array qkv{model_.input(a.query), model_.input(a.key),
+                                         model_.input(a.value)};
+                    block.query_key_value = ops::prepare_linear_weight(qkv);
+                    const std::array rows{dimension(qkv[0].weight.shape[0]),
+                                          dimension(qkv[1].weight.shape[0]),
+                                          dimension(qkv[2].weight.shape[0])};
+                    (void)ops::linear_split_workspace_capacity_bytes(block.query_key_value, rows,
+                                                                     1, 1);
+                    block.query_norm = tensor(a.query_norm);
+                    block.key_norm   = tensor(a.key_norm);
+                    block.output     = linear(a.output);
+                    block.mlp        = dense(layer.mlp);
+                    return block;
+                }));
+        }
+        return out;
+    }
+
 private:
     const ModelShard& model_;
     const ModelProfile& profile_;
@@ -256,15 +365,8 @@ Parameters::Parameters(const ModelShard& source, std::shared_ptr<const ModelProf
                              [&] { return prepare.draft(*w.draft); });
     }
     if (w.dspine) {
-        dspine = with_context(std::string(this->profile->options.speculative_component()), [&] {
-            const auto& source = *w.dspine;
-            DspineTailParameters out;
-            out.final_norm = prepare.tensor(source.final_norm);
-            out.gate_bias  = prepare.tensor(source.bridge.gate_bias);
-            out.tg         = native_weight(model.weight(source.bridge.tg).view);
-            out.tsv        = native_weight(model.weight(source.bridge.tsv).view);
-            return out;
-        });
+        dspine = with_context(std::string(this->profile->options.speculative_component()),
+                              [&] { return prepare.dspine(*w.dspine); });
     }
     if (w.proposal) {
         proposal =
