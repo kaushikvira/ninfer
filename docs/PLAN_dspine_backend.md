@@ -99,11 +99,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- phase: **P2 — walk DONE, T=0 identity RESTORED (D-40); MEASURING accepted/round**
-  (`mwqiks2e-4ba3`, opus-5, `/home/kv/work/wt-dspine-round`, GPU 1 = 25.4 GiB,
-  `a5000-11` down for it). Task: implement the **round reset** (residual stream is
-  refined in place — pass N+1 currently refines what pass N left), then measure
-  **accepted drafts/round over N≥32 rounds** at prod policy + a T=0 arm.
+- phase: **P2 — RESET DONE, ACCEPTANCE PROVEN UNMEASURABLE IN THE PROBE (D-42)**.
+  `0201b102`: round reset ⇒ a round is a pure function of its inputs (`0 of 37 byte
+  streams part` over 32 rounds, alloc-free green). **Acceptance needs the target's
+  logits and there is no DSpine accept wiring** — drafts are never verified — so
+  **criterion ⑤ is a lane arm (a5000-2), not a probe row**, and it needs P2's last
+  code piece: **decode + accept wiring** + a **real-prefill fixture**.
 - **THE BAR (D-40, measured not assumed)**: prod DFlash2 **K=7 = 2.998 accepted/round**
   over 214,153 live rounds ⇒ **≈4.0 tok/round**. DSpine drafts **K=15** with a
   block-16-trained drafter. **Criterion ⑤ = beat 3.0 accepted/round.**
@@ -865,6 +866,33 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   `/home/kv/work` instead. This is the third RAM incident of the night (D-27 guard
   refusal, D-32 worktrees in tmpfs, this) — **on this box, tmpfs habits are the fleet's
   biggest self-inflicted risk, and they are invisible to `df /`.**
+
+- **D-2026-11-21-42** — `⚠` **ACCEPTED/ROUND CANNOT BE MEASURED BY THE PROBE — the criterion
+  moves to the lane arm. This is the end of what the walk can prove.** Merged
+  `0201b102` (from `bf74eda7`/`be7e06e4`). **What is now proven**: the **round reset**
+  (44 round-written streams + all 5 layers' KV pages + the arena workspace, mirroring the
+  engine's per-round `work.reset()`, `draft.cpp:347`) makes a round a **pure function of
+  its inputs** — `two rounds of identical inputs: 0 of 37 byte streams part`, 32/32 rounds
+  identity, both arms deterministic, alloc-free 21159→21159 MiB, 22/22 checks.
+  **What is provably NOT obtainable here**: acceptance requires
+  `speculative_accept_sparse_drafts` to be verified against the **TARGET's logits/argmax
+  over the drafted columns** (`program/decision.cpp:51-92`). The probe never materializes
+  the 25 GiB target payload and feeds **synthetic taps**, therefore:
+  (a) **the accept op is real in the engine but has NO DSpine wiring** — drafts are never
+  verified against target logits; (b) the synthetic features **saturate** and the prod
+  policy is **degenerate** on them (**1 of 16 candidates survives the filter**, peak beats
+  runner-up by ~12,909 table units) ⇒ **the T=0.9 and T=0 arms are the SAME arm**, so
+  D-24c's purpose for the T=0 arm is not served; (c) the "15/15 published" is the tail's
+  **self-referential ceiling**, not acceptance. The agent refused to dress any of that as
+  a number — correct call, and the reason this entry exists.
+  `⚠` **CONSEQUENCE — criterion ⑤ = the a5000-2 lane arm, and it needs P2's last code
+  piece**: the **DSpine decode + accept wiring** in the engine executor (drafts from the
+  walk's path → `speculative_accept_sparse_drafts` against the real target), plus a
+  **captured real-prefill fixture** so the features are not synthetic. Only then can
+  DSpine's accepted/round be put against **DFlash2's 2.998** (D-40). **That is a lane
+  A/B, not a probe row** — `lanes/registry.yml` / PLAN already scope the acceptance arm
+  to `a5000-2`. **Recommendation carried into the MORNING BRIEF: do not open a P3 window
+  until that arm exists and reports.**
 
 ## OBJECTIVE
 
