@@ -674,6 +674,22 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   `q8_g32_fp16`** — dequant-on-gather, NOT a 1.3–2.5 GiB copy that would break D-14's
   sizing) and (ii) the **missing score-table producer** for the sampled tail.
 
+- **D-2026-11-21-36** — `⚠` **A MERGED COMMIT DID NOT COMPILE — my merge gate was the
+  hole, not the subagent.** `c7d09a66` merged `test_dspine_forward_real.cpp` as the
+  forward agent committed it, but the file uses `owner` and `work_device` at **file
+  scope without declaring either** ⇒ a whole-tree `ninja` **stopped at that target**.
+  It was found by an **unrelated** subagent's review (`mwqbcurg-fa28`), not by me: the
+  agent's "it builds" came from a build dir that **never registered** the new test
+  (a `tests.cmake` edit needs a reconfigure; `ninja` alone happily skips a target it
+  does not know about). Fixed `0b03043b` (two declarations, one probe per process,
+  RUN_SERIAL); verified **835 edges / exit 0** and a clean **exit 77** skip.
+  `⚠` **RULE ADDED — the merge gate now includes a build.** After every squash-merge,
+  **build the merged tree** (at minimum every target the change touches), never trust
+  a subagent's green build from its own worktree: their build dir may predate their
+  last edit, may not have reconfigured, and a test they "registered" may never have
+  been compiled. The subagent's own digests are evidence *about their tree*, not about
+  `feat/dspine-spec-backend`.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
