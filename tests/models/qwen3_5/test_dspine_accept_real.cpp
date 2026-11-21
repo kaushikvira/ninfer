@@ -115,6 +115,15 @@ struct Counters {
 };
 Counters counters;
 
+// A phase trace for a seam probe that has to be located, not guessed at: set NINFER_TEST_TRACE to
+// any value and the probe names each phase it enters. Assertions, arms and tolerances are
+// untouched by it; with the variable unset no line of this file behaves differently.
+bool tracing = false;
+void phase(const std::string& what) {
+    if (tracing) std::printf("    trace: %s\n", what.c_str());
+    std::fflush(stdout);
+}
+
 void check(const bool passed, const std::string& what) {
     ++counters.checks;
     std::printf("  %s %s\n", passed ? "GREEN" : "RED", what.c_str());
@@ -492,7 +501,9 @@ struct RoundResult {
 
 RoundResult run_round(Harness& probe, Round& round, MemoryArena& arena, const std::uint64_t seed,
                       const std::int32_t prefix, const bool rotate_drafts) {
+    phase("round: reset");
     reset_round(probe, round, seed);
+    phase("round: the tail's views are bound");
     const execution::DspineTailView view{probe.weight(probe.head),
                                          probe.parameter(probe.weights.final_norm),
                                          probe.parameter(probe.weights.bridge.gate_bias),
@@ -506,7 +517,9 @@ RoundResult run_round(Harness& probe, Round& round, MemoryArena& arena, const st
                                         policies};
     execution::DspineTailOutputs outputs{round.out_drafts, round.out_candidates,
                                           round.out_proposal_q};
+    phase("round: dspine_propose_tail");
     execution::dspine_propose_tail(view, inputs, outputs, arena, probe.cuda());
+    phase("round: the tail returned");
 
     std::vector<std::int32_t> drafts{std::size_t(round.drafts * kBatch)};
     probe.download(drafts.data(), round.out_drafts, drafts.size() * sizeof(std::int32_t));
@@ -539,10 +552,13 @@ RoundResult run_round(Harness& probe, Round& round, MemoryArena& arena, const st
                 "the published round breaks the contract the accept op relies on");
     }
 
+    phase("round: the target is planted");
     const auto planted = plant_target(probe, round, drafts, rotate_drafts ? 0 : prefix);
     out.expected       = planted.prefix;
+    phase("round: the accept op");
     const auto result  = verify(probe, round, arena);
     out.accepted       = result.accepted;
+    phase("round: the accept op returned");
     return out;
 }
 } // namespace
@@ -581,10 +597,14 @@ int main(const int argc, char** argv) {
     // at the production draft count, and the reason a seam probe on a shared card narrows K.
     const std::int32_t requested_drafts = std::stoi(setting("NINFER_TEST_DRAFTS", "0"));
     try {
+        tracing = !setting("NINFER_TEST_TRACE").empty();
         Harness probe(path, device);
         world = &probe;
+        phase("the harness is built: reader, device, context");
         probe.bind();
+        phase("the drafter is bound");
         probe.materialize();
+        phase("the load set is materialized");
         auto drafts = std::int32_t(dimension(probe.config.block_size) - 1);
         if (requested_drafts > 0) drafts = std::min(drafts, requested_drafts);
         std::printf("round: K=%d drafts, batch %d, a %d-wide block, %d-token domain\n", drafts,

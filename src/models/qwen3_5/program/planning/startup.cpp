@@ -3,6 +3,7 @@
 #include "models/qwen3_5/execution/gdn.h"
 #include "models/common/moe/execution.h"
 #include "models/common/context/storage.h"
+#include "models/common/dspine/dspine_serial_tail.h"
 #include "models/qwen3_5/execution/mtp.h"
 #include "models/qwen3_5/planning.h"
 #include "models/qwen3_5/program/planning/startup.h"
@@ -365,7 +366,64 @@ WorkspaceSpec build_workspace_plan(const SequencePlanImpl& plan) {
         }
     }
 
-    if (plan.features.masked_draft()) {
+    // The DSpine arm of the masked-draft sizing, opened by the `masked_draft()` widening
+    // (load_options.h:35 now admits DSpine). It takes the branch the arm below owns, because that
+    // arm's first act is `&*profile.config.draft` - and a DSpine profile's `config.draft` is
+    // empty: models/common/dspine/config.h:96-97 populate `draft` and `dspine` mutually
+    // exclusively (config.cpp:249 vs :255), so after the widening the deref was a nullopt read on
+    // every DSpine plan. The sibling at :113 was already guarded by a `dspine()` arm; this one was
+    // not.
+    //
+    // What it sizes is what the executor runs for this backend, and nothing more: the target's
+    // (K+1)-wide verify block, the one sparse accept op (`program/decision.cpp:86`'s widened gate)
+    // and the proposal tail (`execution::dspine_propose_tail`, whose every arena step is inlined
+    // here in the order it allocates). The DFlash2 arm's drafter halves - the context append, the
+    // feature projection, the draft attention and MLPs, the selector - have no DSpine term here,
+    // because the five DSpine draft layers are probe-only (D-43's open item (c)) and are not in
+    // the executor.
+    if (plan.features.dspine()) {
+        constexpr auto slots = ninfer::models::common::dspine::kSerialTailSlots;
+        const auto tail      = [&](std::int32_t batch) {
+            WorkspaceLayoutBuilder layout;
+            const auto scope   = layout.scope();
+            const auto columns = drafts * batch;
+            // 1. the proposal columns gathered out of the normed block, 2. the head's top-`slots`
+            // scores, 3. serial_scores' argmax chain and its [batch, slots, slots, K] score table.
+            matrix(layout, DType::BF16, dimension(config.hidden_size), columns);
+            matrix(layout, DType::FP32, slots, columns);
+            matrix(layout, DType::I32, slots, columns);
+            matrix(layout, DType::FP32, batch * slots * slots, drafts);
+            // 4. the tail's own grid: candidates, q, index at [batch, K, slots] and its drafts.
+            matrix(layout, DType::I32, batch * drafts, slots);
+            matrix(layout, DType::FP32, batch * drafts, slots);
+            matrix(layout, DType::I32, batch * drafts, slots);
+            matrix(layout, DType::I32, batch, drafts);
+            // The head projections over the token domain: the tower's OWN output head, gathered by
+            // candidate id, never copied (D-37). One `slots x K` grid of them per round - D-43's
+            // perf finding, sized here at the columns the op sees.
+            scratch(layout, ops::linear_topk_workspace_capacity_bytes(
+                                      profile.text.output_head.qtype, profile.text.output_head.n,
+                                      profile.text.output_head.k, columns, columns));
+            return finish(layout);
+        };
+        for (std::int32_t batch = 1; batch <= dimension(plan.max_concurrency); ++batch) {
+            const std::int32_t aggregate = verify * batch;
+            WorkspaceLayoutBuilder target;
+            matrix(target, DType::BF16, dimension(config.hidden_size), aggregate);
+            target_body(target, aggregate, aggregate, qwen3_5::TextPhase::Verify,
+                        GdnWorkspacePath::ReplayRecord, batch, verify, verify, text_envelope);
+            // The sparse verifier is the op this backend publishes to: the same call, the same
+            // argument geometry, so the workspace it needs is the DFlash2 arm's term verbatim.
+            const std::size_t accept =
+                ops::speculative_accept_sparse_drafts_workspace_capacity_bytes(
+                    dimension(profile.public_tokens), {false}, drafts, drafts, batch, batch);
+            WorkspaceLayoutBuilder accepted_hidden;
+            matrix(accepted_hidden, DType::BF16, dimension(config.hidden_size), batch);
+            out.dflash_round =
+                std::max({out.dflash_round, finish(target), accept, finish(accepted_hidden),
+                          tail(batch)});
+        }
+    } else if (plan.features.masked_draft()) {
         {
             const auto* draft                  = &*profile.config.draft;
             const auto dflash_context_capacity = [&](std::int32_t width, std::int32_t batch,

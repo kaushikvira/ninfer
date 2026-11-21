@@ -8,6 +8,16 @@ namespace ninfer::models::qwen3_5::detail {
 
 GraphPreparationSample RankProgramImpl::initialize_graphs(GraphPreparationMode mode) {
     if (!use_cuda_graph || resources.frame.spec.causal_scoring) return {};
+    // DSpine has no graph profile, and the capture below has no DSpine arm: `bodies.draft`'s
+    // `else` branch IS `run_dflash_draft`, so a captured DSpine round would replay DFlash2's
+    // proposal path into the frame (and `bodies.text`'s target-tap read is `config.draft`, empty
+    // for this backend). A silently wrong captured body is the worst of the available outcomes,
+    // so this backend is stopped here - at plan/capture time, before any graph is built - and sent
+    // to the eager route. Eager is also the only route the seam can run on today:
+    // execution/dspine.cpp crosses the device/host boundary three times per round (its step 4 and
+    // step 5, D-43's open item (d)), which is not capturable.
+    if (backend == SpeculativeBackend::Dspine)
+        throw std::logic_error("DSpine has no graph profile; run eager (use_cuda_graph=false)");
     if (graphs) throw std::logic_error("Qwen3.5 graphs are already initialized");
     if (mode == GraphPreparationMode::Complete) {
         initialize_graphs(GraphPreparationMode::Warmup);
