@@ -823,6 +823,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   `ninfer_dspine_serial_tail_op_test` **4 cases, 0 skipped, exit 0** (D-24's K1+K2 and the
   `greedy_t0` degenerate), `ninfer_dspine_serial_tail_test` + `ninfer_dspine_shapes_test`
   exit 0.
+  `⚠` **Lead for the determinism red**: the walk's passes are not independent runs. `run_forward`
+  re-seeds only `work.taps`, while `dspine_finish` **refines the residual stream in place** (the
+  fixture's own words) and the residual is seeded once, at allocation — so pass N+1 refines the
+  residual pass N left behind. "The same inputs twice" is not what that row feeds it: re-seed the
+  walk's in-place streams (residual, codes, normed) per pass before the row is read as a measurement
+  of the forward.
 
 
 ## OBJECTIVE
