@@ -5,6 +5,8 @@
 #include "core/tensor.h"
 #include "core/weight.h"
 #include "ops/common/cuda/reduce.cuh"
+#include "ops/common/numeric/convert.cuh"
+#include "ops/common/quant/integer.cuh"
 #include "ops/common/quant/nvfp4.cuh"
 #include "ninfer/ops/sampling.h"
 #include "ops/sampling/kernels/random.cuh"
@@ -37,6 +39,29 @@ struct TableRef {
     const std::uint8_t* scales;
     float divisor;
 };
+
+// The proposal head: the tower's own output head, which the drafter reuses instead of carrying
+// a copy of it. It is gathered by candidate id and dequantized on access, so the head exists
+// exactly once - in the representation the tower declares. Two representations are live:
+// FP8_E4M3FN_ROW_BF16 (one E4M3 byte per element, one BF16 scale per row) and Q8_G32_FP16 (one
+// signed byte per element at the padded row stride, one FP16 scale per 32-column group - the
+// addressing of ops/embedding/kernel.cuh::embed_gather_q8_kernel, the in-tree gather of this
+// same format). `row_stride` is the code elements per row (the padded columns) and
+// `scale_groups` the scale entries per row (1 for a row-scaled head).
+struct HeadRef {
+    const std::uint8_t* codes;
+    const std::uint8_t* scales;  // BF16 row scales, or the FP16 group-scale plane
+    std::int32_t row_stride;
+    std::int32_t scale_groups;
+};
+
+__device__ __forceinline__ float head_row_scale(const HeadRef& head, std::int32_t row) {
+    return bf16f(static_cast<const __nv_bfloat16*>(static_cast<const void*>(head.scales))[row]);
+}
+
+__device__ __forceinline__ float head_group_scale(const HeadRef& head, std::int64_t group) {
+    return common::load_fp16_unaligned(head.scales + group * 2);
+}
 
 __device__ __forceinline__ __nv_bfloat16 table_elem_bf16(const TableRef& table, bool nvfp4,
                                                          int row, int k, int c) {
@@ -169,13 +194,18 @@ __launch_bounds__(kBlock) __global__ void finish_kernel(
 }
 
 // One CTA per (batch, proposal row). Shared budget ~86 KB for R=512, K=16.
-template <int K, int Block, bool Nvfp4>
+//
+// `scores`, when non-null, receives the whole K x K score matrix of this (batch, proposal row)
+// as FP32 [batch, candidate, sender, drafts] (first axis fastest), which is the table
+// ops::dspine_serial_tail consumes. It is the same score_s the argmax collapses, written out
+// untouched, so emitting it cannot move the numerics of `idx`.
+template <int K, int Block, bool Nvfp4, bool HeadQ8>
 __launch_bounds__(Block) __global__ void serial_scores_kernel(
     const std::int32_t* cand, const __nv_bfloat16* raw, const float* rms,
     const __nv_bfloat16* packed_q, const std::int32_t* anchors, const __nv_bfloat16* norm_w,
-    const __nv_bfloat16* gate_bias, const std::uint8_t* head_codes, const __nv_bfloat16* head_scales,
-    TableRef tg, TableRef tsv, std::int32_t hidden, std::int32_t rank,
-    std::int32_t width, std::int32_t drafts, std::int32_t batch, std::int32_t* idx) {
+    const __nv_bfloat16* gate_bias, HeadRef head, TableRef tg, TableRef tsv, std::int32_t hidden,
+    std::int32_t rank, std::int32_t width, std::int32_t drafts, std::int32_t batch,
+    std::int32_t* idx, float* scores) {
     const std::int32_t b = blockIdx.x / drafts;
     const std::int32_t i = blockIdx.x % drafts;
     if (b >= batch) { return; }
@@ -221,17 +251,27 @@ __launch_bounds__(Block) __global__ void serial_scores_kernel(
     }
     __syncthreads();
 
-    // base_k = dot(raw * norm_w, dequant(head[cand_k])), streamed over H.
+    // base_k = dot(raw * norm_w, dequant(head[cand_k])), streamed over H. The head row is
+    // gathered by candidate id and dequantized element by element; no copy of the head exists.
     {
         const int k     = tid % K;
         const int group = tid / K;
         const std::int64_t raw_base = row_base * hidden;
         const std::int64_t head_base =
-            static_cast<std::int64_t>(cand_s[k]) * hidden;
-        const float scale = bf16f(head_scales[cand_s[k]]);
-        float acc         = 0.0f;
+            static_cast<std::int64_t>(cand_s[k]) * head.row_stride;
+        const std::int64_t scale_base =
+            HeadQ8 ? static_cast<std::int64_t>(cand_s[k]) * head.scale_groups : 0;
+        const float row_scale = HeadQ8 ? 0.0f : head_row_scale(head, cand_s[k]);
+        float acc             = 0.0f;
         for (int h = group; h < hidden; h += Block / K) {
-            const float code = bf16f(fbf16(common::decode_e4m3(head_codes[head_base + h]) * scale));
+            float code;
+            if constexpr (HeadQ8) {
+                const float scale = head_group_scale(head, scale_base + (h >> 5));
+                const auto  code8 = static_cast<std::int8_t>(head.codes[head_base + h]);
+                code              = bf16f(fbf16(static_cast<float>(code8) * scale));
+            } else {
+                code = bf16f(fbf16(common::decode_e4m3(head.codes[head_base + h]) * row_scale));
+            }
             acc += bf16f(raw[raw_base + h]) * bf16f(norm_w[h]) * code;
         }
         partial_s[k * (Block / K) + group] = acc;
@@ -263,6 +303,14 @@ __launch_bounds__(Block) __global__ void serial_scores_kernel(
         score_s[j * K + k] = base_s[k] + (*rms_s) * dot;
     }
     __syncthreads();
+    if (scores != nullptr) {
+        for (int index = tid; index < K * K; index += Block) {
+            const int j = index / K;
+            const int k = index % K;
+            scores[(((static_cast<std::int64_t>(i) * K + j) * K + k) * batch) + b] =
+                score_s[j * K + k];
+        }
+    }
     if (tid < K) {
         int best      = 0;
         float best_v  = score_s[tid * K];
@@ -501,11 +549,29 @@ void dspine_finish_launch(Tensor& residual, const Tensor& rms, const Tensor& del
         stash_raw ? static_cast<__nv_bfloat16*>(stash_raw->data) : nullptr, hidden, width, columns);
 }
 
+namespace {
+// The head planes the kernel gathers, in the representation the artifact declares. The gates of
+// the two accepted representations are in dspine_bridge.cpp; the strides follow from them.
+HeadRef head_ref(const Weight& head) {
+    HeadRef ref;
+    ref.codes  = static_cast<const std::uint8_t*>(head.qdata);
+    ref.scales = static_cast<const std::uint8_t*>(head.scales);
+    if (head.qtype == QType::Q8_G32_FP16) {
+        ref.row_stride   = head.padded_shape[1];
+        ref.scale_groups = head.padded_shape[1] / 32;
+    } else {
+        ref.row_stride   = head.k;
+        ref.scale_groups = 1;
+    }
+    return ref;
+}
+} // namespace
+
 void dspine_serial_scores_launch(const Tensor& cand, const Tensor& raw, const Tensor& rms,
                                  const Tensor& packed_q, const Tensor& anchors,
                                  const Tensor& norm_w, const Tensor& gate_bias, const Weight& head,
                                  const Weight& tg, const Weight& tsv, std::int32_t width,
-                                 Tensor& idx, cudaStream_t stream) {
+                                 Tensor& idx, Tensor* scores, cudaStream_t stream) {
     const std::int32_t hidden = raw.ne[0];
     const std::int32_t rank   = packed_q.ne[0];
     const std::int32_t drafts = cand.ne[1];
@@ -522,42 +588,37 @@ void dspine_serial_scores_launch(const Tensor& cand, const Tensor& raw, const Te
         4;                                                    // rms
     static std::once_flag once;
     std::call_once(once, [&] {
-        CUDA_CHECK(cudaFuncSetAttribute(serial_scores_kernel<kTopK, kBlock, false>,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                        static_cast<int>(shared)));
-        CUDA_CHECK(cudaFuncSetAttribute(serial_scores_kernel<kTopK, kBlock, true>,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                        static_cast<int>(shared)));
+        const auto admit = [&](auto kernel) {
+            CUDA_CHECK(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                            static_cast<int>(shared)));
+        };
+        admit(serial_scores_kernel<kTopK, kBlock, false, false>);
+        admit(serial_scores_kernel<kTopK, kBlock, true, false>);
+        admit(serial_scores_kernel<kTopK, kBlock, false, true>);
+        admit(serial_scores_kernel<kTopK, kBlock, true, true>);
     });
     const TableRef tg_ref  = table_ref(tg);
     const TableRef tsv_ref = table_ref(tsv);
-    const bool nvfp4       = tg.qtype == QType::NVFP4;
+    const HeadRef  head_ref_local = head_ref(head);
+    const bool     nvfp4          = tg.qtype == QType::NVFP4;
+    const bool     head_q8        = head.qtype == QType::Q8_G32_FP16;
+    const auto dispatch = [&](auto kernel) {
+        kernel<<<static_cast<unsigned>(drafts * batch), kBlock, shared, stream>>>(
+            static_cast<const std::int32_t*>(cand.data),
+            static_cast<const __nv_bfloat16*>(raw.data), static_cast<const float*>(rms.data),
+            static_cast<const __nv_bfloat16*>(packed_q.data),
+            static_cast<const std::int32_t*>(anchors.data),
+            static_cast<const __nv_bfloat16*>(norm_w.data),
+            static_cast<const __nv_bfloat16*>(gate_bias.data), head_ref_local, tg_ref, tsv_ref,
+            hidden, rank, width, drafts, batch, static_cast<std::int32_t*>(idx.data),
+            scores ? static_cast<float*>(scores->data) : nullptr);
+    };
     if (nvfp4) {
-        serial_scores_kernel<kTopK, kBlock, true>
-            <<<static_cast<unsigned>(drafts * batch), kBlock, shared, stream>>>(
-                static_cast<const std::int32_t*>(cand.data),
-                static_cast<const __nv_bfloat16*>(raw.data), static_cast<const float*>(rms.data),
-                static_cast<const __nv_bfloat16*>(packed_q.data),
-                static_cast<const std::int32_t*>(anchors.data),
-                static_cast<const __nv_bfloat16*>(norm_w.data),
-                static_cast<const __nv_bfloat16*>(gate_bias.data),
-                static_cast<const std::uint8_t*>(head.qdata),
-                static_cast<const __nv_bfloat16*>(head.scales),
-                tg_ref, tsv_ref, hidden, rank, width, drafts, batch,
-                static_cast<std::int32_t*>(idx.data));
+        if (head_q8) { dispatch(serial_scores_kernel<kTopK, kBlock, true, true>); }
+        else { dispatch(serial_scores_kernel<kTopK, kBlock, true, false>); }
     } else {
-        serial_scores_kernel<kTopK, kBlock, false>
-            <<<static_cast<unsigned>(drafts * batch), kBlock, shared, stream>>>(
-                static_cast<const std::int32_t*>(cand.data),
-                static_cast<const __nv_bfloat16*>(raw.data), static_cast<const float*>(rms.data),
-                static_cast<const __nv_bfloat16*>(packed_q.data),
-                static_cast<const std::int32_t*>(anchors.data),
-                static_cast<const __nv_bfloat16*>(norm_w.data),
-                static_cast<const __nv_bfloat16*>(gate_bias.data),
-                static_cast<const std::uint8_t*>(head.qdata),
-                static_cast<const __nv_bfloat16*>(head.scales),
-                tg_ref, tsv_ref, hidden, rank, width, drafts, batch,
-                static_cast<std::int32_t*>(idx.data));
+        if (head_q8) { dispatch(serial_scores_kernel<kTopK, kBlock, false, true>); }
+        else { dispatch(serial_scores_kernel<kTopK, kBlock, false, false>); }
     }
 }
 

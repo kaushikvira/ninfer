@@ -27,7 +27,7 @@ void dspine_serial_scores_launch(const Tensor& cand, const Tensor& raw, const Te
                                  const Tensor& packed_q, const Tensor& anchors,
                                  const Tensor& norm_w, const Tensor& gate_bias, const Weight& head,
                                  const Weight& tg, const Weight& tsv, std::int32_t width,
-                                 Tensor& idx, cudaStream_t stream);
+                                 Tensor& idx, Tensor* scores, cudaStream_t stream);
 void dspine_serial_chain_launch(const Tensor& cand, const Tensor& idx, Tensor& drafts,
                                 cudaStream_t stream);
 void dspine_serial_tail_launch(const Tensor& table, const Tensor& cand,

@@ -50,16 +50,30 @@ void dspine_finish(Tensor& residual, const Tensor& rms, const Tensor& delta, con
 // proposal row (any fixed column order; the chain is permutation invariant within a row).
 // raw [H, width, batch] BF16, rms [width, batch] FP32 and packed_q [R, width, batch] BF16 are
 // the last-layer stash; row t = 1 + i is read for proposal row i. anchors [batch] I32,
-// norm_w [H] BF16 (final norm), gate_bias [R] BF16, head FP8_E4M3FN_ROW_BF16 [vocab, H],
-// tg [vocab, R] and tsv [vocab, 2R] BF16 or NVFP4 (rows dequantized on gather; formats must match).
+// norm_w [H] BF16 (final norm), gate_bias [R] BF16, tg [vocab, R] and tsv [vocab, 2R] BF16 or
+// NVFP4 (rows dequantized on gather; formats must match).
+//
+// head [vocab, H] is the tower's own output head - the drafter reuses it, it carries no copy -
+// so it arrives in the representation the tower declares: FP8_E4M3FN_ROW_BF16 (RowScale) or
+// Q8_G32_FP16 (RowSplit, group 32, FP16 group scales, the prod V3 tower's format). Both are
+// gathered by candidate id and dequantized per element inside the kernel, the way the tg/tsv
+// and codebook rows already are; a copy of the head into one shared representation is never
+// taken (it would cost 1.3 - 2.5 GiB of VRAM the drafter is not sized for).
+//
 // Per (batch, row i, sender j): base_k = dot(raw * norm_w, dequant(head[cand_k]));
 // sid_j = (i == 0 ? anchor : cand[i-1, j]); m_j = sigmoid(q + tsv[sid_j][:R] + bias) *
 // tsv[sid_j][R:]; score_jk = base_k + rms * dot(m_j, tg[cand_k]); idx_j = argmax_k score_jk.
 // idx [16, drafts, batch] I32.
+//
+// scores, when non-null, additionally receives the K x K score matrix of every (batch, row) as
+// FP32 [batch, 16 (candidate), 16 (sender), drafts] (first axis fastest) - the table
+// dspine_serial_tail consumes, and the un-collapsed form of the same score_s the argmax reads.
+// It is a caller-provided buffer; the Op allocates nothing.
 void dspine_serial_scores(const Tensor& cand, const Tensor& raw, const Tensor& rms,
                           const Tensor& packed_q, const Tensor& anchors, const Tensor& norm_w,
                           const Tensor& gate_bias, const Weight& head, const Weight& tg,
-                          const Weight& tsv, std::int32_t width, Tensor& idx, cudaStream_t stream);
+                          const Weight& tsv, std::int32_t width, Tensor& idx, Tensor* scores,
+                          cudaStream_t stream);
 
 /**
  * Refinement-tail selection under the live request policy (the stochastic sibling of

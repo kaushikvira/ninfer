@@ -216,6 +216,9 @@ struct Builder {
             weight.scale_dtype = DType::BF16;
             weight.n = n;
             weight.k = k;
+            weight.ndim = 2;
+            weight.shape[0] = weight.padded_shape[0] = n;
+            weight.shape[1] = weight.padded_shape[1] = k;
             return weight;
         }
         die("missing --fp8 " + key);
@@ -364,7 +367,7 @@ int main(int argc, char** argv) {
             dspine_serial_scores(builder.tensor(cand), builder.tensor(raw), builder.tensor(rms),
                                  builder.tensor(packed_q), builder.tensor(anchors),
                                  builder.tensor(norm_w), builder.tensor(gate_bias), head, tg, tsv,
-                                 i32(W), idx, stream);
+                                 i32(W), idx, nullptr, stream);
         }
         // 6) serial_chain: cand/idx [16, D, B] -> drafts [D, B]
         else if (args.op == "serial_chain") {

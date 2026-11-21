@@ -44,7 +44,7 @@ from run_parity import decode_e4m3_bytes, write_bin, write_bin_c  # noqa: E402
 
 FIXTURE = HERE / "fixture" / "dspine_nvfp4_fixture"
 OUTPUTS = ("normalized", "rms", "codes", "message", "residual_out", "normed", "stash",
-           "idx", "drafts", "proposal_q")
+           "idx", "drafts", "proposal_q", "scores")
 
 # The teeth of the gather decode: authoring errors in the table path, applied to the
 # REFERENCE decode only. The device must disagree with each.
@@ -56,8 +56,14 @@ GATHER_MUTANTS = {
 }
 
 
-def run_fixture(op, geo, eps, inputs, tables, nvfp4_tables, fp8, policy, workdir) -> dict:
-    """One fixture invocation; returns the produced output files."""
+def run_fixture(op, geo, eps, inputs, tables, nvfp4_tables, fp8, policy, workdir,
+                q8=None, head="fp8", scores=False, pad=False) -> dict:
+    """One fixture invocation; returns the produced output files.
+
+    `q8`/`head` select the head representation serial_scores is handed (the P0b FP8 row-scaled
+    head by default, the tower's Q8_G32_FP16 one for the head-format arm), and `scores` asks for
+    the FP32 [batch,16,16,drafts] score-table output.
+    """
     workdir.mkdir(parents=True, exist_ok=True)
     geometry = {"H": geo["hidden"], "R": geo["rank"], "C": geo["code_size"],
                 "W": geo["width"], "B": geo["batch"], "V": geo["vocab"], "D": geo["drafts"]}
@@ -87,6 +93,16 @@ def run_fixture(op, geo, eps, inputs, tables, nvfp4_tables, fp8, policy, workdir
         write_bin_c(code_path, codes)
         write_bin_c(scale_path, scales)
         command.append(f"--fp8={name}:{code_path}:{scale_path}")
+    if q8 is not None:
+        code_path = workdir / "head_q8codes.bin"
+        scale_path = workdir / "head_q8scales.bin"
+        write_bin_c(code_path, q8[0])
+        write_bin_c(scale_path, q8[1])
+        command.append(f"--q8=head:{code_path}:{scale_path}")
+        command.append(f"--head={head}")
+        command.append(f"--pad={1 if pad else 0}")
+    if scores:
+        command.append("--scores=1")
     for key, value in policy.items():
         command.append(f"--{key}={value}")
     result = subprocess.run(command, capture_output=True, text=True)
