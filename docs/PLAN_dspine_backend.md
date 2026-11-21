@@ -37,6 +37,16 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
+- **P3 AUTHORIZATION: GRANTED, NOT EXERCISED (and it will not be tonight).** The
+  user delegated P2→P4 (D-26) including the full prod window. **No prod window was
+  opened**, because the gate never passed: D-34 shows the forward's linear
+  geometries were refused (now cleared, D-35) with the head-format bridge and
+  score-table producer still open. **Prod has been untouched all night** — 5090-1
+  serving at `health=200`, GPU 0 ~0.9 GiB headroom, no lane event, no image change,
+  no cfg change. The authorization was the *permission ceiling*, never a
+  requirement to use it; opening a window on a 2.5/5 gate would have been the exact
+  mistake the fence exists to prevent.
+
 - phase: **P2 IN FLIGHT** (stage 1 forward harness preserved `92bcb397`; stage 2
   tail landed; stage 3 = engine forward + graph/state + decode-loop wiring
   PENDING). **P0 gate PASSED** (P0b **SOUND**); P0c **SKIPPED by user (D-17)**.
