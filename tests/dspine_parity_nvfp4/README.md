@@ -65,7 +65,12 @@ CUDA_VISIBLE_DEVICES=1 ./run_serial_tail.py --cases 3 --device 0 --temperature 1
 ```
 
 The tail op's own parity vs the C++ host core and the committed Tencent-policy fixture is
-`tests/ops/dspine` (`ninfer_dspine_serial_tail_op_test`), not this directory.
+`tests/ops/dspine` (`ninfer_dspine_serial_tail_op_test`), not this directory — **executed in
+this window for the first time**: `OK 4 cases, 0 skipped, 2.93 s` on GPU 1 (reference parity,
+CUDA-graph capture/replay, the wrong-`inv_temp` teeth, the geometry rejections). Its fixture
+cases carry T ∈ {0, 0.05, 0.7, 0.9, 1.0 (with top_k 4), 1.2}; the D-23 **K1** configuration
+(T = 1.0 *and* the no-cut top_k = 20) is not among them, so K1-proper is still an open arm
+(everything above is at K1).
 
 ## Files
 
@@ -87,6 +92,27 @@ The tail op's own parity vs the C++ host core and the committed Tencent-policy f
 - `run_serial_tail.py` — the tail: format-invariance control, BF16-vs-NVFP4 score tables,
   teeth. `score_table` is the table-level view of `reference.serial_scores`' `scores`
   expression (P0b's reference exposes only its argmax).
+
+## Found in passing: the 1.3157 GiB artifact cannot be bound today (P2 integration, not a kernel gap)
+
+The shipped `qwen3_8_27b_swift15_v3_dspine-nvfp4tables.ninfer` manifest carries
+
+```text
+dspine/bridge/codebook  format nvfp4  [248320, 1024]  block_scale_k16_m128x4_v1
+dspine/bridge/tg        format nvfp4  [248320,  512]  block_scale_k16_m128x4_v1
+dspine/bridge/tsv       format nvfp4  [248320, 1024]  block_scale_k16_m128x4_v1
+```
+
+while `src/models/common/dspine/weights.cpp:46,56,57` bind exactly those three with
+`b.direct(name, shape)`, whose default is `format = QType::BF16` (`models/common/bindings.h:28`),
+and `artifact/binder.cpp:49-53` throws `representation does not match its mathematical value
+type` for any part whose format is not the requested one. So the D-20 artifact is rejected in
+**binding**, before a `Weight` ever reaches the gather kernels that this harness just proved
+sound. The last mile is to bind those three as NVFP4 (per-artifact: the BF16-tables build
+binds BF16), gated on the same shape divisibility the format requires — which the prod shapes
+satisfy (248320 = 1940 × 128; 1024 = 16 × 64; 512 = 8 × 64). Not exercised here: opening the
+25 GiB artifact needs the engine build, which is outside a measurement window; the claim is
+the binding path's code, plus the manifest above.
 
 ## Contract facts this harness pinned down (worth keeping)
 
