@@ -47,8 +47,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   `origin/feat/dspine-spec-backend`.
 - `⚠` **P2 window policy (user, 2026-11-22)**: code first, CPU-only; **one**
   GPU window later takes `a5000-11` (dgemma) down for ALL device verification
-  (NVFP4 gather parity, real DFlash2 baseline, then the A/B). Dgemma stays up
-  until that window opens.
+  (NVFP4 gather parity, sampled-tail **K1+K2** parity, real DFlash2 baseline,
+  then the A/B). Dgemma stays up until that window opens.
+- `⚠` **Kernel-dev sampling standard = K1 (D-24)**: T=1.0, top_k 20, top_p 1.0,
+  min_p 0, fixed seed ⇒ bit-exact vs the C++ oracle. Prod T=0.9/min_p 0.05 is a
+  **composition** test (K2), and the **A/B is the only place T=0.9 is measured
+  for acceptance** (N>=3 repeats + a T=0 arm).
 - `⚠` **P2 GPU reality**: GPU 0 = 488 MiB free (prod), GPU 1 = 380 MiB free
   (basalt 47.4 + dgemma 21.8 + tts). **No GPU work is possible without stopping
   a5000-11 (dgemma)** — a user decision, not a main-agent move.
@@ -313,6 +317,34 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   assumption**: P2 stage 3 + the GPU window must produce tok/s + tok/round for
   DSpine **and** for the DFlash2 K7 control arm on the same corpus, at T=0.9,
   batched, graph-captured. Until then "optimized" is an open claim.
+
+- **D-2026-11-21-24** — **SAMPLING POLICY SPLIT (user, 2026-11-22): kernel dev uses
+  a STANDARD config, prod policy is a composition test, the A/B owns T=0.9.**
+  Rationale: bit-exact parity needs determinism and the *fewest moving parts*;
+  prod T=0.9 + min_p 0.05 mixes four independent knobs into every comparison, so
+  a mismatch cannot be attributed. Three tiers, each with a named purpose:
+  | tier | policy | used for | verdict standard |
+  |---|---|---|---|
+  | **K1 kernel math** | **T=1.0** (`inv_temp`=1, i.e. plain softmax), **top_k=20**
+  (engine max, = kTopK 16 candidates so no cut), **top_p=1.0, min_p=0.0** (both
+  disabled), **fixed seed** | sampled-tail op parity vs the pure-C++ oracle;
+  every filter is bypassed so only the arithmetic is under test |
+  **BIT-EXACT** (same draws, same bits) |
+  | **K2 composition** | T=0.9, top_k=20, top_p=1.0, **min_p=0.05** (prod);
+  plus boundary cases top_p=0.9 / min_p=0.1 / top_k=1..3 / T→0 | proves the
+  filter ORDER and the prod policy compose on top of a green K1 |
+  **BIT-EXACT vs oracle per case** (oracle implements the same order) |
+  | **A1 A/B acceptance** | prod policy (T=0.9, min_p 0.05) + a T=0 arm |
+  DSpine vs **DFlash2 K7 control** on the same corpus | **N>=3 repeats per
+  arm**, report mean and range — a single stochastic run is not a measurement |
+  `⚠` Rules: (a) a K1/K2 case is never "greened" by tolerance — the oracle
+  computes the same order, so the comparison is exact; (b) **T→0 must equal the
+  greedy pair bit-for-bit** (that is the degenerate-equivalence check, and it is
+  free); (c) the A/B reports **tok/round AND tok/s**, both arms, and a T=0 arm so
+  drafting quality is separable from sampling noise; (d) the fork's own numbers
+  are T=0 on the stock tower (D-23) — they are comparable only to our T=0 arm,
+  never to the A1 result. Supersedes D-22's "prod T=0.9 precondition" phrasing:
+  the **parity debt is now K1+K2**, cleared in the GPU window.
 
 ## OBJECTIVE
 
