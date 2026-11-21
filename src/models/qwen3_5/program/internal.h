@@ -119,7 +119,7 @@ public:
     void prepare_mtp_draft(ComputeOperation&);
     void run_mtp_draft(std::uint32_t batch, std::uint32_t steps, std::uint32_t frontier);
     void run_dflash_draft(std::uint32_t batch, std::uint32_t minimum, std::uint32_t maximum);
-    void run_dspine_draft(std::uint32_t batch);
+    void run_dspine_draft(std::uint32_t batch, std::uint32_t minimum, std::uint32_t maximum);
     void project_decode(std::uint32_t batch, std::uint32_t width);
     void decide_decode(std::uint32_t batch, std::uint32_t width);
     void readback_decode(std::uint32_t batch, bool speculative);

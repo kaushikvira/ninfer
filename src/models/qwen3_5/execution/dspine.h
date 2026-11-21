@@ -175,6 +175,17 @@ struct DspineWalkOutputs {
 void dspine_walk(DspineExecutionView view, const DspineWalkInputs& inputs,
                  DspineWalkOutputs& outputs, ops::ContextAttentionExecutionEnvelope envelope);
 
+// The arena bytes one DSpine round needs at the given geometry: the walk's transients (the
+// streams it allocates for the whole round, plus the widest of its per-layer scopes), the
+// quantized activations its A16-only projections stage, and the context append's own. The
+// proposal tail's share is `dspine_propose_tail`'s, sized by the caller as it always was; the two
+// are the two halves of the round, and the workspace is the round. A plan sized for the tail
+// alone is a walk that runs out of arena mid-layer, which is a launch failure in the middle of
+// the round, not a refusal.
+[[nodiscard]] std::size_t dspine_round_workspace_bytes(
+    const models::dspine::Config& draft, std::int32_t batch, std::int32_t width,
+    ops::ContextAttentionExecutionEnvelope envelope, std::int32_t multiprocessors);
+
 // The proposal tail's inputs: the streams the draft layers' LAST fused bridge write leaves
 // behind, at the shapes `dspine_serial_scores` names them by. `stash` is the pre-refinement
 // residual of the 16-wide block, `rms` its per-column read scale, `packed_q` the bridge message;

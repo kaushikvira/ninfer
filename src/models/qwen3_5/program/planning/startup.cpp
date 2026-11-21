@@ -1,4 +1,5 @@
 #include "models/qwen3_5/execution/attention.h"
+#include "models/qwen3_5/execution/dspine.h"
 #include "models/qwen3_5/execution/dense_mlp.h"
 #include "models/qwen3_5/execution/gdn.h"
 #include "models/common/moe/execution.h"
@@ -419,9 +420,27 @@ WorkspaceSpec build_workspace_plan(const SequencePlanImpl& plan) {
                     dimension(profile.public_tokens), {false}, drafts, drafts, batch, batch);
             WorkspaceLayoutBuilder accepted_hidden;
             matrix(accepted_hidden, DType::BF16, dimension(config.hidden_size), batch);
+            // The walk's share of the same round. It runs in the round's own arena, the one the
+            // tail's serial grid is taken out of, and it is the larger of the two by a wide
+            // margin: a [hidden, columns] field and a [intermediate, columns] field for the block,
+            // plus the layer scopes. Sized by the function the walk itself is written against, so
+            // a stream added to the walk moves this reserve with it - the reserve is the reason a
+            // DSpine plan can be opened at all, and an arena that runs out mid-layer is a launch
+            // failure in the middle of a live round, not a refusal at plan time.
+            const auto walk = [&](std::int32_t batch) {
+                WorkspaceLayoutBuilder layout;
+                const auto scope = layout.scope();
+                // The drafter's own paged context is bounded by the plan's capacity, the same
+                // envelope the DFlash2 drafter's full context is sized against just below.
+                scratch(layout, execution::dspine_round_workspace_bytes(
+                                    *profile.config.dspine, batch, drafts + 1,
+                                    ops::ContextAttentionExecutionEnvelope{0, plan.capacity},
+                                    plan.multiprocessor_count));
+                return finish(layout);
+            };
             out.dflash_round =
                 std::max({out.dflash_round, finish(target), accept, finish(accepted_hidden),
-                          tail(batch)});
+                          tail(batch), walk(batch)});
         }
     } else if (plan.features.masked_draft()) {
         {
