@@ -66,13 +66,40 @@ filter, T=0.9 and T=0 are the same arm). So the deciding number is **not** a pro
 > rounds at K=7, from prod's own `/metrics`). To beat it, DSpine must run a **real round
 > on a real target** — i.e. the `a5000-2` lane arm the registry already scopes.
 
-**What I'd do next (in order)**: ① wire the DSpine round into the engine's **decode +
-accept** path behind `--spec dspine` (in flight `mwqjfvzx-66f3`; strictly backend-gated,
-DFlash2 untouched, same accept op and same accounting so the comparison is
-apples-to-apples) → ② a **captured real-prefill fixture** so features are not synthetic
-→ ③ run the **a5000-2 lane A/B**: DSpine K15 vs DFlash2 K7, N≥3, T=0.9 **plus** a T=0
-arm → ④ only if that beats ~3.0 does a P3 window make sense. Remember **GPU 0 has
-~0.5 GiB of slack**: prod teardown must precede anything landing on the 5090.
+**Where the build actually ended (D-44/D-45).** The **decode + accept seam is wired and
+executable** — `--spec dspine` now attaches at the engine's real accept op, **one op at
+one call site**, so the A/B compares **the same formula by construction**. Four DSpine-only
+defects found by a gate were fixed; **DFlash2's touched surface is exactly 3 provably
+no-op lines**, the suite sits at its 9 pre-existing failures (reproduced at the pre-fix
+sha), and the widened accept site got its **first runtime net** (sampling 549 cases, 0
+skipped; sequence, decode_graph, sampling_defaults — 5/5).
+
+**There is still no acceptance number, and it is now clear that two things must exist
+before one can.** (1) The probe cannot answer it — the accept op verifies against the
+**target's** logits and the probe has no target; on synthetic taps the prod filter keeps
+1 of 16 candidates so **T=0.9 IS T=0** there. (2) `probe #70` additionally stops
+pre-output (1 core pegged, RSS 194.6 MiB, `minflt` 12906, K-independent, 0 % GPU) while
+`#71`/`#72` run the identical reader/device sequence on the same artifact in 0.17–0.29 s —
+so it is that target's link closure, not the data path.
+
+**The plan to a number, in dependency order:**
+1. **DSpine draft-context append + the 5-layer walk in the executor** (both probe-only
+   today). The seam now stops at a *named throw* instead of a nullopt read — that throw is
+   the gatepost. Note `run_dspine_draft` passes `bridge_message` unprefixed ⇒ **batch-1
+   only**.
+2. **A captured real-prefill fixture** so the policy stops being degenerate (1 of 16).
+3. **The `a5000-2` lane A/B**: DSpine K15 vs DFlash2 K7, N≥3, T=0.9 **plus** a T=0 arm.
+4. **Carry D-43's cost in the same arm**: at K=15 the tail's score table is
+   **thousands of 248,320×5,120 matvecs per round**. Criterion ⑤ is therefore *accepted
+   tokens per unit time*, not accepted tokens — this is the one that can quietly kill the
+   idea, and it has never been measured.
+5. Only if that beats ~3.0 accepted/round **without losing tok/s** does a P3 window make
+   sense. **GPU 0 has ~0.5 GiB of slack**: prod teardown must precede anything on the 5090.
+
+**Standing obligations not specific to this phase**: the **DFlash2 real control arm**
+(D-21(b)) still needs an artifact+device window — its runtime has never been exercised in
+this build, and it is the A/B's denominator; and the 9-failure suite list is
+**pre-existing** at `010ce9b3`, so no future gate needs to re-derive it.
 
 status: active · updated: 2026-11-22 · branch: feat/dspine-spec-backend (base main 70afbf33)
 
