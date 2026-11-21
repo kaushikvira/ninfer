@@ -75,6 +75,7 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <csignal>
@@ -83,6 +84,7 @@
 #include <cstring>
 #include <execinfo.h>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -1394,17 +1396,17 @@ void reset_round(Probe& probe, Work& work, MemoryArena& arena, const bool rotate
     upload_i32(work.context_lengths, context_lengths, "context lengths");
     upload_i32(work.context_counts, context_counts, "context counts");
     upload_i32(work.table_rows, table_rows, "page table rows");
-    std::vector<std::int32_t> context_positions(std::size_t(kContext * kBatch));
+    std::vector<std::int32_t> context_positions(std::size_t(kContext * kBatch), 0);
     for (std::int32_t index = 0; index < kContext * kBatch; ++index) {
         context_positions[std::size_t(index)] = index;
     }
     upload_i32(work.context_positions, context_positions, "context positions");
-    std::vector<std::int32_t> block_positions(std::size_t(kSlots * kBatch));
+    std::vector<std::int32_t> block_positions(std::size_t(kSlots * kBatch), 0);
     for (std::int32_t index = 0; index < kSlots * kBatch; ++index) {
         block_positions[std::size_t(index)] = kContext + index;
     }
     upload_i32(work.positions, block_positions, "block positions");
-    std::vector<std::int32_t> draws(std::size_t(kBatch));
+    std::vector<std::int32_t> draws(std::size_t(kBatch), 0);
     for (std::int32_t index = 0; index < kBatch; ++index) {
         draws[std::size_t(index)] = 1024 + index;
     }
@@ -1590,6 +1592,9 @@ struct RoundRate {
     std::int32_t arm_prefix        = 0;  // ... as the longest matching prefix
     float q_drawn             = 0.0F;  // the q the tail put on the id it drew, mean over slots
     float q_rank0             = 0.0F;  // the q on the slot's rank-0 candidate, mean over slots
+    float standing            = 0.0F;  // candidates the policy's filter leaves standing, of 16
+    float top_mass            = 0.0F;  // softmax(row / 0.9) mass on the walked row's own peak
+    float logit_gap           = 0.0F;  // that peak less its runner-up, in score-table units
     const char* contract_reason = nullptr;
 };
 
@@ -1610,6 +1615,16 @@ struct RoundRate {
         return values;
     }();
     const auto tail_cand = download_i32(work.tail_cand);
+    // The sender the walk stood on to fill each slot's row: the tail's own `idx`, walked from the
+    // anchor at slot 0. The score table's row for (slot, sender) is the row that generated that
+    // slot's draw, so it is the row a claim about the policy's temperature has to be read on.
+    const auto senders = download_i32(work.index);
+    const auto table   = [&] {
+        std::vector<float> values(std::size_t(std::int64_t(kBatch) * kSlots * kSlots * slots));
+        download(values.data(), work.table.data, values.size() * sizeof(float), "score table");
+        return values;
+    }();
+    std::array<std::int32_t, kBatch> sender{0};
     std::vector<std::int32_t> drawn = round.sampled;
     const char* reason              = common::dspine::serial_tail_accept_q_error(
         q.data(), tail_cand.data(), drawn.data(), kSlots, slots, kBatch, 1e-4F);
@@ -1643,6 +1658,39 @@ struct RoundRate {
             }
             if (chosen >= 0) { q_drawn_total += at_q(chosen); }
             q_rank0_total += at_q(0);
+            // Is the production policy sampling at all on this input set? The mass that the policy's
+            // own filter leaves standing is `q` itself - the device wrote the filtered row for the
+            // sender this walk reached - so the count of its positive entries is the round's own
+            // answer, not a recomputation of it. The two rows after it read the same walked sender
+            // row out of the score table, before any filter: how much of softmax(row / 0.9) lands on
+            // the peak, and by how far the peak beats the runner-up. A row that leaves ONE candidate
+            // standing is a row whose sampled draw IS its argmax, at any temperature, and then the
+            // T=0.9 arm and the T=0 arm are the same arm - which is the one thing the A1 arm-to-arm
+            // comparison exists to separate (D-24c), so it has to be on the record.
+            std::int32_t standing = 0;
+            for (std::int32_t candidate = 0; candidate < kSlots; ++candidate) {
+                standing += at_q(candidate) > 0.0F;
+            }
+            out.standing += float(standing) / float(kBatch * slots);
+            const auto walked = senders[std::size_t(
+                (std::int64_t(sender[std::size_t(batch)]) * slots + slot) * kBatch + batch)];
+            float peak = -std::numeric_limits<float>::infinity();
+            float runner = peak;
+            std::vector<float> row(std::size_t(kSlots), 0.0F);
+            for (std::int32_t candidate = 0; candidate < kSlots; ++candidate) {
+                row[std::size_t(candidate)] = table[std::size_t(
+                    ((std::int64_t(slot) * kSlots + walked) * kSlots + candidate) * kBatch
+                    + batch)];
+                peak  = std::max(peak, row[std::size_t(candidate)]);
+            }
+            float mass = 0.0F;
+            for (std::int32_t candidate = 0; candidate < kSlots; ++candidate) {
+                const auto value = row[std::size_t(candidate)];
+                runner = value == peak ? runner : std::max(runner, value);
+                mass += std::exp((value - peak) / 0.9F);
+            }
+            out.top_mass  += (1.0F / mass) / float(kBatch * slots);
+            out.logit_gap += (peak - runner) / float(kBatch * slots);
             const auto hits_head = at_head(0) == draft;
             out.against_head_top1 += hits_head;
             prefix_open = prefix_open && hits_head;
@@ -1652,6 +1700,7 @@ struct RoundRate {
             out.arms_agree += agrees;
             arm_open = arm_open && agrees;
             arm_prefix += arm_open;
+            sender[std::size_t(batch)] = walked;
         }
     }
     out.head_prefix = prefix;
@@ -1679,7 +1728,7 @@ void measure_rounds(Probe& probe, Work& work, MemoryArena& arena) {
     }
     struct Series {
         std::vector<std::int32_t> published, contract, top1, head_prefix, agree, arm_prefix;
-        std::vector<float> q_drawn, q_rank0;
+        std::vector<float> q_drawn, q_rank0, standing, top_mass, logit_gap;
     };
     Series series;
     std::int32_t parted_rounds = 0, same_as_warmup = 0;
@@ -1700,6 +1749,9 @@ void measure_rounds(Probe& probe, Work& work, MemoryArena& arena) {
         series.arm_prefix.push_back(rates.arm_prefix);
         series.q_drawn.push_back(rates.q_drawn);
         series.q_rank0.push_back(rates.q_rank0);
+        series.standing.push_back(rates.standing);
+        series.top_mass.push_back(rates.top_mass);
+        series.logit_gap.push_back(rates.logit_gap);
         contract_refusals += rates.contract_reason != nullptr;
         if (contract_refusals == 1) {
             std::printf("        the accept contract refused a round: %s\n",
@@ -1722,12 +1774,12 @@ void measure_rounds(Probe& probe, Work& work, MemoryArena& arena) {
         if (round < 8 || round + 4 >= rounds) {
             std::printf("  round %3d: %2d/%d drafts published, %2d against the head's own argmax "
                         "(prefix %2d), %2d against the T=0 arm (prefix %2d), contract %s, "
-                        "q(drawn) %.4f q(rank0) %.4f\n",
+                        "q(drawn) %.4f q(rank0) %.4f, %.2f of 16 standing\n",
                         int(round), int(rates.published), std::int32_t(kBatch * slots),
                         int(rates.against_head_top1), int(rates.head_prefix),
                         int(rates.arms_agree), int(rates.arm_prefix),
                         rates.contract_reason == nullptr ? "ok" : "REFUSED",
-                        double(rates.q_drawn), double(rates.q_rank0));
+                        double(rates.q_drawn), double(rates.q_rank0), double(rates.standing));
             std::fflush(stdout);
         }
         (void)parted;
@@ -1765,6 +1817,18 @@ void measure_rounds(Probe& probe, Work& work, MemoryArena& arena) {
     std::printf("        the q the tail put on the id it drew: mean %.5f; on its slot's rank-0 "
                 "candidate: mean %.5f\n",
                 q_mean(series.q_drawn), q_mean(series.q_rank0));
+    std::printf("        POLICY: the production filter leaves %.3f of 16 candidates standing per "
+                "slot; softmax(walked row / 0.9) puts %.6f of the row's mass on its peak, which "
+                "beats the runner-up by %.1f table units\n",
+                q_mean(series.standing), q_mean(series.top_mass), q_mean(series.logit_gap));
+    if (q_mean(series.standing) < 1.5) {
+        std::printf("        POLICY IS DEGENERATE ON THIS INPUT SET: one candidate survives the "
+                    "filter per slot, so the T=0.9 arm draws the argmax and IS the T=0 arm. The "
+                    "arm-to-arm agreement above is forced by that and measures nothing about "
+                    "drafting quality: no sampling luck is separable from drafting quality here, "
+                    "which is the stated purpose of the T=0 arm (D-24c)\n");
+    }
+    std::fflush(stdout);
     std::printf("        the accept contract refused %d of %d rounds\n", contract_refusals,
                 rounds);
     std::printf("  identity: rounds whose published ids equal the warmup round's: %d of %d\n",
@@ -1859,9 +1923,22 @@ int main(const int argc, char** argv) {
             const auto complete   = [&] { return counters.gates == gate_floor; };
 
             std::printf("the proposal path, on the real weights:\n");
+            // The module-load pass. The first walk of a process takes 4 MiB of its own and
+            // publishes the field the first-touch load leaves behind (D-39's red 1); the engine's
+            // decode graphs need the same warmup pass before anything is measured over them, so
+            // the walk gets one here and every row below - the alloc-free row included - is taken
+            // over passes that are past it.
+            const auto warmup = walk_and_draft(probe, work, arena, false);
+            std::printf("  the module-load pass: %zu gates, %zu drafts published, %llu MiB free\n",
+                        counters.gates, warmup.sampled.size(),
+                        [&] {
+                            std::uint64_t bytes = 0, all = 0;
+                            cuda_ok(cudaMemGetInfo(&bytes, &all), "memory info");
+                            return static_cast<unsigned long long>(bytes / 1024 / 1024);
+                        }());
             std::uint64_t free_before = 0, total = 0;
             cuda_ok(cudaMemGetInfo(&free_before, &total), "memory info");
-            auto first = walk_and_draft(probe, work, arena, false);
+            auto first = walk_and_draft(probe, work, arena, false, true);
             std::uint64_t free_after = 0;
             cuda_ok(cudaMemGetInfo(&free_after, &total), "memory info");
             if (complete()) {
