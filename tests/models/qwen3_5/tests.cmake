@@ -24,8 +24,12 @@ set_tests_properties(ninfer_qwen3_5_dspine_real_test PROPERTIES
 # the supported bridge chain, and the sampled tail composed onto the target head. It materializes
 # ~4 GiB on one card, so it is opt-in by NINFER_TEST_ARTIFACT and NINFER_TEST_DEVICE (D-29: a
 # device probe never guesses a card) and skips, exit 77, without either.
+# The accept-side row of the round (`serial_tail_accept_q_error`, the contract the drafts the
+# serial tail publishes must satisfy before `speculative_accept_sparse_drafts` will take them) is
+# the engine's own host code, compiled in as the tail's own unit test compiles it.
 ninfer_add_test(ninfer_qwen3_5_dspine_forward_real_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_forward_real.cpp"
+          "${PROJECT_SOURCE_DIR}/src/models/common/dspine/dspine_serial_tail.cpp"
   LIBRARIES ninfer_model_loading ninfer_ops)
 set_tests_properties(ninfer_qwen3_5_dspine_forward_real_test PROPERTIES
   SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 1800)

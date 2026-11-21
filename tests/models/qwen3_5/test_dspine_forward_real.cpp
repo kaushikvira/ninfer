@@ -51,6 +51,7 @@
 #include "core/weight_view.h"
 #include "models/common/bindings.h"
 #include "models/common/dspine/config.h"
+#include "models/common/dspine/dspine_serial_tail.h"
 #include "models/common/dspine/weights.h"
 #include "ninfer/ops/dspine_bridge.h"
 #include "ninfer/ops/embedding.h"
@@ -73,6 +74,8 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <csignal>
@@ -81,9 +84,13 @@
 #include <cstring>
 #include <execinfo.h>
 #include <exception>
+#include <limits>
 #include <memory>
+#include <numeric>
+#include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -1011,35 +1018,9 @@ void run_forward(Probe& probe, Work& work, MemoryArena& arena) {
     const auto inter   = dimension(probe.config.intermediate_size);
     const auto& layers = probe.weights.layers;
 
-    std::vector<std::int32_t> anchors(std::size_t(b), 0), lengths(std::size_t(b), 0),
-        valid(std::size_t(b), 0), context_lengths(std::size_t(b), 0),
-        context_counts(std::size_t(b), 0), table_rows(std::size_t(b), 0),
-        context_positions(std::size_t(std::int64_t(ctx) * b), 0),
-        block_positions(std::size_t(std::int64_t(w) * b), 0);
-    for (std::int32_t index = 0; index < b; ++index) {
-        anchors[index]         = 40901 + index * 7;
-        lengths[index]         = ctx;  // the block starts where the context ends
-        valid[index]           = columns;
-        context_lengths[index] = ctx;
-        context_counts[index]  = ctx;
-        table_rows[index]      = 0;
-    }
-    for (std::int32_t index = 0; index < ctx * b; ++index) {
-        context_positions[std::size_t(index)] = index;
-    }
-    for (std::int32_t index = 0; index < w * b; ++index) {
-        block_positions[std::size_t(index)] = ctx + index;
-    }
-    upload_i32(work.anchors, anchors, "anchors");
-    upload_i32(work.lengths, lengths, "block lengths");
-    upload_i32(work.valid, valid, "valid columns");
-    upload_i32(work.context_lengths, context_lengths, "context lengths");
-    upload_i32(work.context_counts, context_counts, "context counts");
-    upload_i32(work.table_rows, table_rows, "page table rows");
-    upload_i32(work.context_positions, context_positions, "context positions");
-    upload_i32(work.positions, block_positions, "block positions");
-    seed(work.taps);
-
+    // The round's inputs - the block arrangement's scalars, the context geometry, the block's
+    // positions and the tap field - are established by reset_round, which is the round reset. What
+    // runs below is the walk proper, and it is a function of nothing but those bytes.
     gate_base = counters.gates;
     const auto gated = [&] { return counters.gates != gate_base; };
 
@@ -1337,6 +1318,192 @@ void seed_taps_rotated(const Tensor& taps) {
     (void)plane;
 }
 
+// --- the round's state, and the reset that owns it -------------------------------------------
+//
+// A proposal round is a pure function of the weights and of its own inputs ONLY if every stream
+// it touches starts from a state the round itself establishes. These are the streams and regions
+// the walk mutates in place, that is to say that survive a round and enter the next one:
+//
+//   the residual stream      `dspine_finish` refines it in place (include/ninfer/ops/
+//                            dspine_bridge.h:41-47) and the two adds accumulate into it
+//                            (`residual_add`, `linear_add`, run_forward's layer loop);
+//   the bridge's read state  `rms` (dspine_prepare_read's per-column scale, read back by
+//                            `dspine_finish` and by `dspine_serial_scores`) and the last bridge's
+//                            `stash` + `message` - the tail's `raw`/`packed_q` inputs;
+//   the 16-wide block         `ids`/`positions` plus every stream the five draft layers write
+//                            (hidden, projected, context, the q/k/v and attended streams,
+//                            intermediate, normalized, normed, delta, codes, packed);
+//   the draft layers' pages  the paged context each layer's attention reads, one fixture per layer
+//                            (written by `kv_cache_append_prefix` at the context positions);
+//   the head and the table   the top-16 candidate rows and scores, the FP32 K x K score table and
+//                            `serial_scores`' idx;
+//   the tail's own state     `drafts`, `index`, the greedy pair's `chain_drafts`, and
+//                            `proposal_q` - of which the tail writes ONLY the sender row its walk
+//                            reaches per slot (src/models/common/dspine/dspine_serial_tail.cpp:
+//                            258-268), so the other fifteen sender rows are the PREVIOUS round's;
+//   the ops' scratch         the one arena the whole walk shares: the linear families'
+//                            quantizer/workspace, `linear_topk`'s partial planes and its
+//                            `group_done` arrival counters, which the merge kernel zeroes only at
+//                            the counters' own scope (src/ops/linear/topk/merge.cu:158,129).
+//
+// The engine's own round opens exactly this way: `propose_batch_impl` begins with
+// `execution.work.reset()` and re-derives its residual from `prepare_masked_block` + `embedding`
+// (src/models/qwen3_5/execution/draft.cpp:347-353), so a decode round never reads the previous
+// round's scratch, and the per-round buffers it hands out are the frame's own
+// (src/models/qwen3_5/execution/draft.h:36-43). What follows is the DSpine round's equivalent of
+// that reset, over the streams the DSpine walk owns.
+void reset_round(Probe& probe, Work& work, MemoryArena& arena, const bool rotate_taps) {
+    ++counters.steps;
+    const CudaDeviceScope settling(probe.device);
+    // The scratch the linear families and the top-k merge share, at the capacity the walk sized
+    // it to. Zeroed, then the arena's cursor is rewound, so round N+2 cannot read round N's
+    // partial planes, arrival counters or quantizer bounds.
+    const auto scratch = arena.storage();
+    cuda_ok(cudaMemset(scratch.data, 0, scratch.bytes), "reset the walk's shared workspace");
+    arena.reset();
+    // The streams the round writes, in whole or in part. Zeroing them is what turns "the same
+    // inputs twice" into a statement: a stream the round writes only in part (proposal_q) is
+    // defined over the whole of it after the reset, not over last round's sender rows.
+    const std::vector<Tensor*> streams{
+        &work.ids,           &work.positions,       &work.context_positions, &work.lengths,
+        &work.valid,         &work.context_lengths, &work.context_counts,   &work.table_rows,
+        &work.anchors,       &work.taps,            &work.projected,         &work.context,
+        &work.hidden,        &work.residual,        &work.normalized,        &work.rms,
+        &work.codes,         &work.codes_out,       &work.packed,            &work.message,
+        &work.delta,         &work.normed,          &work.stash,             &work.intermediate,
+        &work.query,         &work.key,             &work.value,             &work.attended,
+        &work.context_key,   &work.context_value,   &work.scratch_query,     &work.query_raw,
+        &work.key_raw,       &work.context_key_raw, &work.proposal,          &work.candidates,
+        &work.scores,        &work.idx_scores,      &work.table,             &work.tail_cand,
+        &work.drafts,        &work.proposal_q,      &work.index,             &work.chain_drafts,
+        &work.positions_rng,  &work.configs};
+    for (auto* stream : streams) {
+        cuda_ok(cudaMemset(stream->data, 0, stream->bytes()), "reset a round stream");
+    }
+    // The draft layers' paged context: the whole record set, so a page the round does not append
+    // to cannot carry last round's key or value into this round's attention.
+    for (const auto& cache : work.caches) {
+        const auto pages = cache->storage();
+        cuda_ok(cudaMemset(pages.data, 0, pages.bytes), "reset a layer's context pages");
+    }
+    // The round's own inputs: the block arrangement and its positions, the context geometry, the
+    // tail's draw coordinates, and the tap field. Everything after this point is the walk.
+    const std::vector<std::int32_t> anchors{40901}, lengths{kContext}, valid{kSlots},
+        context_lengths{kContext}, context_counts{kContext}, table_rows{0};
+    upload_i32(work.anchors, anchors, "anchors");
+    upload_i32(work.lengths, lengths, "block lengths");
+    upload_i32(work.valid, valid, "valid columns");
+    upload_i32(work.context_lengths, context_lengths, "context lengths");
+    upload_i32(work.context_counts, context_counts, "context counts");
+    upload_i32(work.table_rows, table_rows, "page table rows");
+    std::vector<std::int32_t> context_positions(std::size_t(kContext * kBatch), 0);
+    for (std::int32_t index = 0; index < kContext * kBatch; ++index) {
+        context_positions[std::size_t(index)] = index;
+    }
+    upload_i32(work.context_positions, context_positions, "context positions");
+    std::vector<std::int32_t> block_positions(std::size_t(kSlots * kBatch), 0);
+    for (std::int32_t index = 0; index < kSlots * kBatch; ++index) {
+        block_positions[std::size_t(index)] = kContext + index;
+    }
+    upload_i32(work.positions, block_positions, "block positions");
+    std::vector<std::int32_t> draws(std::size_t(kBatch), 0);
+    for (std::int32_t index = 0; index < kBatch; ++index) {
+        draws[std::size_t(index)] = 1024 + index;
+    }
+    upload_i32(work.positions_rng, draws, "tail draw positions");
+    if (rotate_taps) { seed_taps_rotated(work.taps); } else { seed(work.taps); }
+}
+
+// A FNV-1a digest over a device stream. "The same bytes" has to be a statement about every byte of
+// the round, not about the fifteen ids the probe happens to print: two rounds whose drafts agree
+// while their score tables part are two rounds that got lucky.
+[[nodiscard]] std::uint64_t digest(const void* bytes, const std::size_t count) {
+    const auto* data = static_cast<const std::uint8_t*>(bytes);
+    std::uint64_t hash = 14695981039346656037ULL;  // FNV-1a 64-bit offset basis
+    for (std::size_t index = 0; index < count; ++index) {
+        hash ^= static_cast<std::uint64_t>(data[index]);
+        hash *= 1099511628211ULL;  // the FNV-1a 64-bit prime
+    }
+    return hash;
+}
+
+[[nodiscard]] std::uint64_t digest_stream(const Tensor& stream) {
+    std::vector<std::byte> bytes(std::size_t(stream.bytes()));
+    download(bytes.data(), stream.data, bytes.size(), "fingerprint a round stream");
+    return digest(bytes.data(), bytes.size());
+}
+
+// Every byte the round owns, digested by name: the streams, the five layers' pages, and the ids.
+struct Fingerprint {
+    std::vector<std::pair<std::string, std::uint64_t>> parts;
+
+    [[nodiscard]] std::vector<std::string> parted_against(const Fingerprint& other) const {
+        std::vector<std::string> parted;
+        for (std::size_t index = 0; index < parts.size(); ++index) {
+            if (parts[std::size_t(index)].second
+                != other.parts[std::size_t(index)].second) {
+                parted.push_back(parts[std::size_t(index)].first);
+            }
+        }
+        return parted;
+    }
+};
+
+[[nodiscard]] Fingerprint fingerprint_round(Probe& probe, Work& work) {
+    const CudaDeviceScope settling(probe.device);
+    cuda_ok(cudaDeviceSynchronize(), "the round's bytes before the fingerprint");
+    Fingerprint out;
+    const std::vector<std::pair<std::string, Tensor*>> streams{
+        {"block ids", &work.ids},
+        {"block positions", &work.positions},
+        {"taps", &work.taps},
+        {"feature projection", &work.projected},
+        {"context norm", &work.context},
+        {"hidden", &work.hidden},
+        {"residual (refined in place)", &work.residual},
+        {"normalized", &work.normalized},
+        {"rms (the bridge's read scale)", &work.rms},
+        {"codes", &work.codes},
+        {"packed gate/predecessor/value", &work.packed},
+        {"message (the tail's packed_q)", &work.message},
+        {"delta", &work.delta},
+        {"normed (the proposal hidden)", &work.normed},
+        {"stash (the tail's raw)", &work.stash},
+        {"mlp intermediate", &work.intermediate},
+        {"query", &work.query},
+        {"key", &work.key},
+        {"value", &work.value},
+        {"attended", &work.attended},
+        {"context key", &work.context_key},
+        {"context value", &work.context_value},
+        {"proposal columns", &work.proposal},
+        {"head candidate rows", &work.candidates},
+        {"head score rows", &work.scores},
+        {"serial_scores idx", &work.idx_scores},
+        {"serial_scores table", &work.table},
+        {"tail candidate stream", &work.tail_cand},
+        {"tail drafts", &work.drafts},
+        {"tail proposal_q", &work.proposal_q},
+        {"tail idx", &work.index},
+        {"greedy pair drafts", &work.chain_drafts}};
+    for (const auto& [name, stream] : streams) {
+        out.parts.emplace_back(name, digest_stream(*stream));
+    }
+    // The fixtures own their page storage outside the probe's own buffer list, so the readback is
+    // a plain device-to-host copy of the region the append writes, not a transfer through
+    // owning_buffer.
+    for (std::size_t layer = 0; layer < work.caches.size(); ++layer) {
+        const auto pages = work.caches[layer]->storage();
+        std::vector<std::byte> bytes(std::size_t(pages.bytes));
+        cuda_ok(cudaMemcpy(bytes.data(), pages.data, bytes.size(), cudaMemcpyDeviceToHost),
+                "fingerprint a layer's pages");
+        out.parts.emplace_back("context pages of layer " + std::to_string(layer),
+                               digest(bytes.data(), bytes.size()));
+    }
+    return out;
+}
+
+
 // One full pass: the block walk, the head, the score table, then the tail at both policies.
 struct Round {
     // The round's own published drafts, its own greedy pair, and the head's candidate rows it
@@ -1345,11 +1512,16 @@ struct Round {
     std::int32_t table_flips = -1;
     std::int32_t misplaced_cand = -1;
     bool complete = false;
+    // Every byte the round owns, digested. Taken only on the rounds the identity rows judge.
+    std::optional<Fingerprint> bytes;
 };
 
 [[nodiscard]] Round walk_and_draft(Probe& probe, Work& work, MemoryArena& arena,
-                                   const bool rotate_taps) {
-    if (rotate_taps) { seed_taps_rotated(work.taps); } else { seed(work.taps); }
+                                   const bool rotate_taps, const bool identity = false) {
+    // Every round is its own reset plus the walk: the shared workspace, the streams the round
+    // writes in part, the layers' context pages, and the round's own inputs. Without it, "the same
+    // inputs twice" is not what the determinism row feeds the engine.
+    reset_round(probe, work, arena, rotate_taps);
     const auto gates = counters.gates;
     run_forward(probe, work, arena);
     Round out;
@@ -1391,7 +1563,282 @@ struct Round {
     std::fflush(stdout);
     out.misplaced_cand = measure_tail_cand_layout(probe, work);
     out.table_flips    = measure_table_against_idx(probe, work);
+    if (identity && out.bytes == std::nullopt) { out.bytes = fingerprint_round(probe, work); }
     return out;
+}
+
+// --- the multi-round rows ---------------------------------------------------------------------
+//
+// WHAT THIS HARNESS CAN AND CANNOT MEASURE ABOUT ACCEPTANCE. The engine's accept entry
+// (`ops::speculative_accept_sparse_drafts`, include/ninfer/ops/speculative_accept.h:65-110) verifies
+// a round against the TARGET's logits over the drafted columns - `logits [248320, K+1, B]` plus
+// `target_tokens`, the target's own argmax over them - exactly as prod wires it
+// (src/models/qwen3_5/program/decision.cpp:76-92: `project_decode` puts the TARGET hidden through
+// the tower head, `argmax` collapses it, `decide_decode` hands both to the acceptor). This probe
+// loads the drafter, the tower head and the token embedding and deliberately never materializes
+// the 25 GiB target payload (the load contract at the head of this file), and its activations are
+// the synthetic tap field `seed` writes, not a real prompt's target features. So there is no target
+// forward here, hence no target logits, hence NO ACCEPTED-DRAFTS NUMBER THAT MEANS WHAT PROD'S
+// 2.998 MEANS. Every rate below is the drafter measured against the streams that produced it, and
+// is labelled as such: the tail's own q checked against the tail's own draws, the tail's ids
+// checked against the tower head's own argmax. They are drafting-quality diagnostics, not
+// acceptance, and none of them is the P3 criterion-5 measurement.
+struct RoundRate {
+    std::int32_t published  = 0;  // proposal slots that published a draft id
+    std::int32_t contract   = 0;  // slots whose (q, candidates, draft) break the accept contract
+    std::int32_t against_head_top1 = 0;  // drafts equal to the head's own rank-0 of that slot
+    std::int32_t head_prefix       = 0;  // ... as the longest matching prefix (an accept prefix)
+    std::int32_t arms_agree        = 0;  // slots where T=0.9 and T=0 published the same id
+    std::int32_t arm_prefix        = 0;  // ... as the longest matching prefix
+    float q_drawn             = 0.0F;  // the q the tail put on the id it drew, mean over slots
+    float q_rank0             = 0.0F;  // the q on the slot's rank-0 candidate, mean over slots
+    float standing            = 0.0F;  // candidates the policy's filter leaves standing, of 16
+    float top_mass            = 0.0F;  // softmax(row / 0.9) mass on the walked row's own peak
+    float logit_gap           = 0.0F;  // that peak less its runner-up, in score-table units
+    const char* contract_reason = nullptr;
+};
+
+// One publishing round's rates. The accept-contract check is the engine's own
+// `serial_tail_accept_q_error` over the device streams, at the layouts the accept entry declares;
+// it is a VALIDITY check on the round (q normalised, the drawn id one of its candidates with
+// positive mass, no repeated ids), which is what `speculative_accept_sparse_drafts` requires of a
+// proposal - it is NOT a comparison of the drafts against any target.
+[[nodiscard]] RoundRate rate_round(Probe& probe, Work& work, const Round& round) {
+    const CudaDeviceScope settling(probe.device);
+    cuda_ok(cudaDeviceSynchronize(), "the round's tail streams before the rates");
+    const auto slots = std::int32_t(work.candidates.ne[1]);
+    RoundRate out;
+    const auto q     = [&] {
+        std::vector<float> values(std::size_t(std::int64_t(kBatch) * slots * kSlots));
+        download(values.data(), work.proposal_q.data, values.size() * sizeof(float),
+                 "the tail's proposal q");
+        return values;
+    }();
+    const auto tail_cand = download_i32(work.tail_cand);
+    // The sender the walk stood on to fill each slot's row: the tail's own `idx`, walked from the
+    // anchor at slot 0. The score table's row for (slot, sender) is the row that generated that
+    // slot's draw, so it is the row a claim about the policy's temperature has to be read on.
+    const auto senders = download_i32(work.index);
+    const auto table   = [&] {
+        std::vector<float> values(std::size_t(std::int64_t(kBatch) * kSlots * kSlots * slots));
+        download(values.data(), work.table.data, values.size() * sizeof(float), "score table");
+        return values;
+    }();
+    std::array<std::int32_t, kBatch> sender{0};
+    std::vector<std::int32_t> drawn = round.sampled;
+    const char* reason              = common::dspine::serial_tail_accept_q_error(
+        q.data(), tail_cand.data(), drawn.data(), kSlots, slots, kBatch, 1e-4F);
+    out.contract_reason = reason;
+    out.contract        = reason == nullptr ? 0 : kBatch * slots;
+    float q_drawn_total = 0.0F, q_rank0_total = 0.0F;
+    std::int32_t prefix = 0, arm_prefix = 0;
+    bool prefix_open = true, arm_open = true;
+    for (std::int32_t batch = 0; batch < kBatch; ++batch) {
+        for (std::int32_t slot = 0; slot < slots; ++slot) {
+            const auto at_cand = [&](const std::int32_t candidate) {
+                return tail_cand[std::size_t(batch
+                                             + std::int64_t(kBatch) * (slot + slots * candidate))];
+            };
+            const auto at_q = [&](const std::int32_t candidate) {
+                return q[std::size_t(batch
+                                     + std::int64_t(kBatch) * (slot + slots * candidate))];
+            };
+            // The head's own ranking of the same slot, [candidate, slot, batch] with the candidate
+            // axis first: rank 0 is the head's argmax of the tower head over this slot's proposal
+            // hidden. The tail draws out of THAT set, so agreement with it is self-referential.
+            const auto at_head = [&](const std::int32_t candidate) {
+                return round.head[std::size_t(candidate
+                                               + std::int64_t(kSlots) * (slot + slots * batch))];
+            };
+            const auto draft = drawn[std::size_t(batch + std::int64_t(kBatch) * slot)];
+            out.published += draft != 0;
+            std::int32_t chosen = -1;
+            for (std::int32_t candidate = 0; candidate < kSlots; ++candidate) {
+                if (at_cand(candidate) == draft) { chosen = candidate; break; }
+            }
+            if (chosen >= 0) { q_drawn_total += at_q(chosen); }
+            q_rank0_total += at_q(0);
+            // Is the production policy sampling at all on this input set? The mass that the policy's
+            // own filter leaves standing is `q` itself - the device wrote the filtered row for the
+            // sender this walk reached - so the count of its positive entries is the round's own
+            // answer, not a recomputation of it. The two rows after it read the same walked sender
+            // row out of the score table, before any filter: how much of softmax(row / 0.9) lands on
+            // the peak, and by how far the peak beats the runner-up. A row that leaves ONE candidate
+            // standing is a row whose sampled draw IS its argmax, at any temperature, and then the
+            // T=0.9 arm and the T=0 arm are the same arm - which is the one thing the A1 arm-to-arm
+            // comparison exists to separate (D-24c), so it has to be on the record.
+            std::int32_t standing = 0;
+            for (std::int32_t candidate = 0; candidate < kSlots; ++candidate) {
+                standing += at_q(candidate) > 0.0F;
+            }
+            out.standing += float(standing) / float(kBatch * slots);
+            const auto walked = senders[std::size_t(
+                (std::int64_t(sender[std::size_t(batch)]) * slots + slot) * kBatch + batch)];
+            float peak = -std::numeric_limits<float>::infinity();
+            float runner = peak;
+            std::vector<float> row(std::size_t(kSlots), 0.0F);
+            for (std::int32_t candidate = 0; candidate < kSlots; ++candidate) {
+                row[std::size_t(candidate)] = table[std::size_t(
+                    ((std::int64_t(slot) * kSlots + walked) * kSlots + candidate) * kBatch
+                    + batch)];
+                peak  = std::max(peak, row[std::size_t(candidate)]);
+            }
+            float mass = 0.0F;
+            for (std::int32_t candidate = 0; candidate < kSlots; ++candidate) {
+                const auto value = row[std::size_t(candidate)];
+                runner = value == peak ? runner : std::max(runner, value);
+                mass += std::exp((value - peak) / 0.9F);
+            }
+            out.top_mass  += (1.0F / mass) / float(kBatch * slots);
+            out.logit_gap += (peak - runner) / float(kBatch * slots);
+            const auto hits_head = at_head(0) == draft;
+            out.against_head_top1 += hits_head;
+            prefix_open = prefix_open && hits_head;
+            prefix += prefix_open;
+            const auto agrees = round.greedy[std::size_t(batch + std::int64_t(kBatch) * slot)]
+                           == draft;
+            out.arms_agree += agrees;
+            arm_open = arm_open && agrees;
+            arm_prefix += arm_open;
+            sender[std::size_t(batch)] = walked;
+        }
+    }
+    out.head_prefix = prefix;
+    out.arm_prefix  = arm_prefix;
+    out.q_drawn     = q_drawn_total / float(std::max(1, out.published));
+    out.q_rank0     = q_rank0_total / float(kBatch * slots);
+    return out;
+}
+
+// The multi-round run: a warmup pass, then N rounds of the SAME inputs, each with its own round
+// reset, and the mean/range of the rates. `NINFER_TEST_ROUNDS` raises N; the floor is the task's 32.
+void measure_rounds(Probe& probe, Work& work, MemoryArena& arena) {
+    const auto wanted = setting("NINFER_TEST_ROUNDS", "32");
+    const auto asked  = std::atoi(wanted.c_str());
+    const auto rounds = std::max(32, asked > 0 ? asked : 32);
+    const auto slots  = std::int32_t(work.candidates.ne[1]);
+    std::printf("multi-round: %d rounds of identical inputs, each behind its own round reset\n",
+                rounds + 1);
+    std::fflush(stdout);
+    // The warmup pass: the first pass of a process publishes nothing (the module-load pass, D-39).
+    auto warm = walk_and_draft(probe, work, arena, false);
+    if (!warm.complete) {
+        std::printf("  GATE  the warmup round did not complete: no multi-round rows\n");
+        return;
+    }
+    struct Series {
+        std::vector<std::int32_t> published, contract, top1, head_prefix, agree, arm_prefix;
+        std::vector<float> q_drawn, q_rank0, standing, top_mass, logit_gap;
+    };
+    Series series;
+    std::int32_t parted_rounds = 0, same_as_warmup = 0;
+    std::optional<Fingerprint> previous;
+    std::int32_t contract_refusals = 0;
+    for (std::int32_t round = 0; round < rounds; ++round) {
+        auto taken = walk_and_draft(probe, work, arena, false, true);
+        if (!taken.complete) {
+            std::printf("  GATE  round %d did not complete\n", int(round));
+            return;
+        }
+        const auto rates = rate_round(probe, work, taken);
+        series.published.push_back(rates.published);
+        series.contract.push_back(rates.contract);
+        series.top1.push_back(rates.against_head_top1);
+        series.head_prefix.push_back(rates.head_prefix);
+        series.agree.push_back(rates.arms_agree);
+        series.arm_prefix.push_back(rates.arm_prefix);
+        series.q_drawn.push_back(rates.q_drawn);
+        series.q_rank0.push_back(rates.q_rank0);
+        series.standing.push_back(rates.standing);
+        series.top_mass.push_back(rates.top_mass);
+        series.logit_gap.push_back(rates.logit_gap);
+        contract_refusals += rates.contract_reason != nullptr;
+        if (contract_refusals == 1) {
+            std::printf("        the accept contract refused a round: %s\n",
+                        rates.contract_reason);
+        }
+        // Round identity: the bytes of this round against the previous one, on identical inputs.
+        std::vector<std::string> parted;
+        if (taken.bytes.has_value() && previous.has_value()) {
+            parted = taken.bytes->parted_against(*previous);
+            parted_rounds += not parted.empty();
+            if (not parted.empty() && round < 4) {
+                std::printf("        round %d parts from round %d in %zu of %zu byte streams (first:"
+                            " %s)\n",
+                            int(round + 1), int(round), parted.size(),
+                            taken.bytes->parts.size(), parted.front().c_str());
+            }
+        }
+        previous = taken.bytes;
+        same_as_warmup += taken.sampled == warm.sampled;
+        if (round < 8 || round + 4 >= rounds) {
+            std::printf("  round %3d: %2d/%d drafts published, %2d against the head's own argmax "
+                        "(prefix %2d), %2d against the T=0 arm (prefix %2d), contract %s, "
+                        "q(drawn) %.4f q(rank0) %.4f, %.2f of 16 standing\n",
+                        int(round), int(rates.published), std::int32_t(kBatch * slots),
+                        int(rates.against_head_top1), int(rates.head_prefix),
+                        int(rates.arms_agree), int(rates.arm_prefix),
+                        rates.contract_reason == nullptr ? "ok" : "REFUSED",
+                        double(rates.q_drawn), double(rates.q_rank0), double(rates.standing));
+            std::fflush(stdout);
+        }
+        (void)parted;
+    }
+    const auto spread = [](const std::vector<std::int32_t>& values) {
+        const auto [low, high] = std::minmax_element(values.begin(), values.end());
+        const double mean      = std::accumulate(values.begin(), values.end(), 0.0)
+                            / double(std::max<std::size_t>(1, values.size()));
+        return std::make_tuple(mean, int(*low), int(*high));
+    };
+    const auto [published, published_low, published_high] = spread(series.published);
+    const auto [top1, top1_low, top1_high]                 = spread(series.top1);
+    const auto [head_prefix, head_prefix_low, head_prefix_high] = spread(series.head_prefix);
+    const auto [agree, agree_low, agree_high]                   = spread(series.agree);
+    const auto [arm_prefix, arm_prefix_low, arm_prefix_high]    = spread(series.arm_prefix);
+    const auto q_mean = [](const std::vector<float>& values) {
+        return std::accumulate(values.begin(), values.end(), 0.0) / double(std::max<std::size_t>(
+                   1, values.size()));
+    };
+    std::printf("  multi-round over %d rounds, at the production policy (T=0.9, top_k 20, top_p 1.0,"
+                " min_p 0.05):\n",
+                rounds);
+    std::printf("        drafts published per round: mean %.3f, range %d..%d  of %d slots\n",
+                published, published_low, published_high, std::int32_t(kBatch * slots));
+    std::printf("        SELF-REFERENTIAL (the tail's ids against the tower head that generated "
+                "them):\n");
+    std::printf("        agreement with the head's own argmax: mean %.3f, range %d..%d; as an "
+                "accept-prefix mean %.3f, range %d..%d\n",
+                top1, top1_low, top1_high, head_prefix, head_prefix_low, head_prefix_high);
+    std::printf("        SELF-REFERENTIAL (the tail's T=0.9 arm against its own T=0 arm, same "
+                "table):\n");
+    std::printf("        arms agree: mean %.3f, range %d..%d; as an accept-prefix mean %.3f, "
+                "range %d..%d\n",
+                agree, agree_low, agree_high, arm_prefix, arm_prefix_low, arm_prefix_high);
+    std::printf("        the q the tail put on the id it drew: mean %.5f; on its slot's rank-0 "
+                "candidate: mean %.5f\n",
+                q_mean(series.q_drawn), q_mean(series.q_rank0));
+    std::printf("        POLICY: the production filter leaves %.3f of 16 candidates standing per "
+                "slot; softmax(walked row / 0.9) puts %.6f of the row's mass on its peak, which "
+                "beats the runner-up by %.1f table units\n",
+                q_mean(series.standing), q_mean(series.top_mass), q_mean(series.logit_gap));
+    if (q_mean(series.standing) < 1.5) {
+        std::printf("        POLICY IS DEGENERATE ON THIS INPUT SET: one candidate survives the "
+                    "filter per slot, so the T=0.9 arm draws the argmax and IS the T=0 arm. The "
+                    "arm-to-arm agreement above is forced by that and measures nothing about "
+                    "drafting quality: no sampling luck is separable from drafting quality here, "
+                    "which is the stated purpose of the T=0 arm (D-24c)\n");
+    }
+    std::fflush(stdout);
+    std::printf("        the accept contract refused %d of %d rounds\n", contract_refusals,
+                rounds);
+    std::printf("  identity: rounds whose published ids equal the warmup round's: %d of %d\n",
+                same_as_warmup, rounds);
+    require(parted_rounds == 0,
+            "two rounds of identical inputs did not publish identical bytes");
+    require(published == double(kBatch * slots),
+            "a round published fewer drafts than it has slots: the tail has no early abort, so "
+            "every slot must publish");
+    std::fflush(stdout);
 }
 
 } // namespace
@@ -1476,9 +1923,22 @@ int main(const int argc, char** argv) {
             const auto complete   = [&] { return counters.gates == gate_floor; };
 
             std::printf("the proposal path, on the real weights:\n");
+            // The module-load pass. The first walk of a process takes 4 MiB of its own and
+            // publishes the field the first-touch load leaves behind (D-39's red 1); the engine's
+            // decode graphs need the same warmup pass before anything is measured over them, so
+            // the walk gets one here and every row below - the alloc-free row included - is taken
+            // over passes that are past it.
+            const auto warmup = walk_and_draft(probe, work, arena, false);
+            std::printf("  the module-load pass: %zu gates, %zu drafts published, %llu MiB free\n",
+                        counters.gates, warmup.sampled.size(),
+                        [&] {
+                            std::uint64_t bytes = 0, all = 0;
+                            cuda_ok(cudaMemGetInfo(&bytes, &all), "memory info");
+                            return static_cast<unsigned long long>(bytes / 1024 / 1024);
+                        }());
             std::uint64_t free_before = 0, total = 0;
             cuda_ok(cudaMemGetInfo(&free_before, &total), "memory info");
-            auto first = walk_and_draft(probe, work, arena, false);
+            auto first = walk_and_draft(probe, work, arena, false, true);
             std::uint64_t free_after = 0;
             cuda_ok(cudaMemGetInfo(&free_after, &total), "memory info");
             if (complete()) {
@@ -1491,12 +1951,36 @@ int main(const int argc, char** argv) {
 
                 // Determinism: the same inputs, walked again, must publish the same bytes.
                 std::printf("determinism: the same inputs, walked again\n");
-                auto second = walk_and_draft(probe, work, arena, false);
+                auto second = walk_and_draft(probe, work, arena, false, true);
                 require(second.complete, "the second walk did not complete");
                 require(second.sampled == first.sampled,
                         "the sampled arm is not deterministic on the device");
                 require(second.greedy == first.greedy,
                         "the T=0 arm is not deterministic on the device");
+
+                // The byte-level form of the same row: two rounds of identical inputs, each behind
+                // its own round reset, digest identically over every stream the round owns. The
+                // ids alone are not the identity - a round can publish the same fifteen ids out of
+                // a score table that moved.
+                auto again = walk_and_draft(probe, work, arena, false, true);
+                require(again.complete, "the third walk did not complete");
+                require(again.sampled == second.sampled,
+                        "the sampled arm is not deterministic between two publishing rounds");
+                require(again.greedy == second.greedy,
+                        "the T=0 arm is not deterministic between two publishing rounds");
+                if (again.bytes.has_value() && second.bytes.has_value()) {
+                    const auto parted = again.bytes->parted_against(*second.bytes);
+                    std::printf("        two rounds of identical inputs: %zu of %zu byte streams "
+                                "part\n",
+                                parted.size(), again.bytes->parts.size());
+                    for (std::size_t index = 0; index < std::min<std::size_t>(8, parted.size());
+                         ++index) {
+                        std::printf("          parts: %s\n", parted[index].c_str());
+                    }
+                    require(parted.empty(),
+                            "two rounds of identical inputs did not produce identical bytes");
+                    std::fflush(stdout);
+                }
 
                 if (const auto path = setting("NINFER_TEST_DUMP"); !path.empty()) {
                     std::printf("reference dump: %s\n", path.c_str());
@@ -1643,6 +2127,10 @@ int main(const int argc, char** argv) {
                 };
                 judge(second, "the second pass (the first that publishes)");
                 judge(mutated, "the rotated-tap pass (the teeth round)");
+
+                // The multi-round rows: N rounds of identical inputs behind the round reset, the
+                // per-round rates, and the statement of what the harness cannot measure.
+                measure_rounds(probe, work, arena);
             }
         }
     } catch (const std::exception& error) {
