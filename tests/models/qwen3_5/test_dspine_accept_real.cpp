@@ -54,6 +54,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <array>
 #include <random>
 #include <set>
 #include <stdexcept>
@@ -63,6 +64,7 @@
 namespace {
 using namespace ninfer;
 using namespace ninfer::models;
+using namespace ninfer::models::qwen3_5;
 namespace dspine = ninfer::models::dspine;
 namespace common = ninfer::models::common::dspine;
 
@@ -86,6 +88,14 @@ void cuda_ok(const cudaError_t error, const char* what) {
     if (error != cudaSuccess)
         throw std::runtime_error(std::string(what) + ": " + cudaGetErrorString(error));
     cuda_ok(cudaGetLastError(), what);
+}
+
+// The row's live sampling policies, one per row, as the streams carry them.
+using DspinePolicies = const ops::SamplingConfig*;
+
+std::uint16_t to_bits(const float value) {
+    const auto bits = std::bit_cast<std::uint32_t>(value);
+    return static_cast<std::uint16_t>((bits >> 16) + ((bits >> 16) & 1U));
 }
 
 std::string setting(const std::string_view name, const std::string_view fallback = {}) {
@@ -321,9 +331,13 @@ void reset_round(Harness& probe, Round& round, const std::uint64_t seed) {
     const auto h = std::int64_t(probe.target.hidden_size);
     const auto r = std::int64_t(probe.config.bridge.rank);
     const auto columns = std::int64_t(round.width) * kBatch;
-    std::vector<std::uint16_t> raw(std::size_t(h * columns));
-    std::vector<std::uint16_t> message(std::size_t(r * columns));
-    std::mt19937_64_engine draw(seed * 0x9E3779B97C460C17ULL + 0x2545F4914F6CDD1DULL);
+    std::vector<std::uint16_t> raw{std::size_t(h * columns)};
+    std::vector<std::uint16_t> message{std::size_t(r * columns)};
+    std::uint64_t state = seed * 0x9E3779B97C460C17ULL + 0x2545F4914F6CDD1DULL;
+    const auto unit = [&] {
+        state ^= state >> 12; state ^= state << 25; state ^= state >> 27;
+        return float(((state * 0x2545F4914F6CDD1DULL) >> 40) / float(1ULL << 24));
+    };
     const auto to_bf16 = [](const float value) {
         const auto bits = std::bit_cast<std::uint32_t>(value);
         return static_cast<std::uint16_t>((bits >> 16) + ((bits >> 16) & 1U));
@@ -331,25 +345,25 @@ void reset_round(Harness& probe, Round& round, const std::uint64_t seed) {
     for (std::int64_t column = 0; column < columns; ++column)
         for (std::int64_t row = 0; row < h; ++row)
             raw[std::size_t(column * h + row)] =
-                to_bf16(std::uniform_real_distribution<float>(-1.5F, 1.5F)(draw));
+                to_bf16((unit() * 3.0F - 1.5F));
     for (std::int64_t column = 0; column < columns; ++column)
         for (std::int64_t row = 0; row < r; ++row)
             message[std::size_t(column * r + row)] =
-                to_bf16(std::uniform_real_distribution<float>(-0.8F, 0.8F)(draw));
+                to_bf16((unit() * 1.6F - 0.8F));
     world->upload(round.bridge_raw, raw.data(), raw.size() * 2);
     world->upload(round.bridge_message, message.data(), message.size() * 2);
     // The proposal hidden is the block's normed stream, column 0 the anchor's: the tail scores
     // rows 1..K of it, and the analytic target below scores the same rows.
     world->upload(round.proposal_hidden, raw.data(), raw.size() * 2);
 
-    std::vector<float> rms(std::size_t(columns), 1.0F);
+    std::vector<float> rms{std::size_t(columns), 1.0F};
     for (std::size_t index = 1; index < rms.size(); ++index)
         rms[index] = 1.0F + 0.05F * float(index % 7);
     world->upload(round.bridge_rms, rms.data(), rms.size() * 4);
 
     // The row's live sampling policy: the production arm (T=0.9, the engine's top-k/top-p pair)
     // is the one D-24 names; the T=0 arm is its greedy degenerate.
-    std::vector<ops::SamplingConfig> configs(std::size_t(kBatch), ops::SamplingConfig{});
+    std::vector<ops::SamplingConfig> configs{std::size_t(kBatch), ops::SamplingConfig{}};
     for (auto& config : configs) {
         config.temperature = 0.9F;
         config.top_k       = 20;
@@ -374,10 +388,10 @@ TargetAnswer plant_target(Harness& probe, Round& round, const std::vector<std::i
                           const std::int32_t prefix) {
     const auto width  = round.width;
     const auto columns = std::int64_t(width) * kBatch;
-    std::vector<std::uint16_t> logits(std::size_t(std::int64_t(kPhysicalRows) * columns),
-                                       to_bits(0.0F));
+    std::vector<std::uint16_t> logits{std::size_t(std::int64_t(kPhysicalRows) * columns),
+                                           to_bits(0.0F)};
     TargetAnswer answer;
-    answer.argmax.assign(std::size_t(columns), 0);
+    answer.argmax = std::vector<std::int32_t>(std::size_t(columns), 0);
     for (std::int32_t column = 0; column < width; ++column) {
         const std::int32_t winner = column < std::int32_t(drafts.size()) && column < prefix
                                         ? drafts[std::size_t(column)]
@@ -395,11 +409,6 @@ TargetAnswer plant_target(Harness& probe, Round& round, const std::vector<std::i
     return answer;
 }
 
-std::uint16_t to_bits(const float value) {
-    const auto bits = std::bit_cast<std::uint32_t>(value);
-    return static_cast<std::uint16_t>((bits >> 16) + ((bits >> 16) & 1U));
-}
-
 // The verify, at the argument list program/decision.cpp:84-93 hands the op for DFlash2 - the
 // same op, the same order, the same envelope - and the accepted-token accounting at
 // decision.cpp:204-211: accepted = count - 1 over the op's own counts.
@@ -413,14 +422,14 @@ Verified verify(Harness& probe, Round& round, MemoryArena& arena) {
     Verified out;
     out.extent = round.drafts;
     const auto batch = kBatch;
-    auto counts =
-        Tensor(round.licensed_counts.data(), probe.device, DType::I32, {batch, 1, 1, 1});
+    Tensor counts{round.licensed_counts.data, probe.device, DType::I32, {batch, 1, 1, 1}};
+    const auto* policies = static_cast<DspinePolicies>(round.configs.data);
     ops::speculative_accept_sparse_drafts(
         round.target_argmax, round.target_logits, round.out_drafts, round.out_candidates,
         round.out_proposal_q, round.extents, round.base_positions, round.licensed_tokens, counts,
-        kTokenDomain, static_cast<const ops::SamplingConfig*>(round.configs.data),
+        kTokenDomain, policies,
         ops::SpeculativeAcceptExecutionEnvelope{false}, round.live_rows, arena, probe.cuda());
-    std::vector<std::int32_t> host(std::size_t(batch));
+    std::vector<std::int32_t> host{std::size_t(batch)};
     probe.download(host.data(), round.licensed_counts, host.size() * sizeof(std::int32_t));
     for (const auto count : host) {
         require(count >= 1, "the accept op licensed an empty prefix");
@@ -436,14 +445,14 @@ Verified verify(Harness& probe, Round& round, MemoryArena& arena) {
 // layouts provably not the same bytes at the production K.
 void check_bridges() {
     const std::int32_t slots = kSlots, drafts = 15, batch = 2;
-    std::vector<std::int32_t> head(std::size_t(slots * drafts * batch)),
-        tail(std::size_t(slots * drafts * batch)), back(std::size_t(slots * drafts * batch));
+    std::vector<std::int32_t> head{std::size_t(slots * drafts * batch)},
+        tail{std::size_t(slots * drafts * batch)}, back{std::size_t(slots * drafts * batch)};
     for (std::size_t index = 0; index < head.size(); ++index)
         head[index] = static_cast<std::int32_t>(index * 7 + 3);
     execution::dspine_bridge_head_to_tail(head.data(), tail.data(), slots, drafts, batch);
     execution::dspine_bridge_tail_to_head(tail.data(), back.data(), slots, drafts, batch);
     check(head == back, "a candidate grid survives the head -> tail -> head round trip");
-    std::vector<float> head_q(head.size()), tail_q(tail.size()), back_q(back.size());
+    std::vector<float> head_q{head.size()}, tail_q{tail.size()};
     for (std::size_t index = 0; index < head_q.size(); ++index)
         head_q[index] = 0.001F * float(index) + 0.5F;
     for (std::size_t index = 0; index < head.size(); ++index) {
@@ -453,7 +462,7 @@ void check_bridges() {
         const std::int32_t slot = std::int32_t((index / std::size_t(slots)) % std::size_t(drafts));
         const std::int32_t row  = std::int32_t(index / (std::size_t(slots) * drafts));
         const auto from = std::size_t(candidate
-                                      + std::int64_t(slots) * (slot + std::int64_t(drafts) * row)));
+                                      + std::int64_t(slots) * (slot + std::int64_t(drafts) * row));
         const auto to   = std::size_t(row
                                       + std::int64_t(batch) * (slot + std::int64_t(drafts) * candidate));
         if (head[from] != tail[to]) {
@@ -463,7 +472,7 @@ void check_bridges() {
         head_q[std::size_t(from)] = head_q[std::size_t(from)];
         tail_q[std::size_t(to)]   = head_q[std::size_t(from)];
     }
-    std::vector<float> round_trip(head_q.size());
+    std::vector<float> round_trip{head_q.size()};
     execution::dspine_bridge_tail_to_head(tail_q.data(), round_trip.data(), slots, drafts, batch);
     check(head_q == round_trip, "an FP32 q grid survives the tail -> head bridge");
     bool identical_bytes = true;
@@ -488,23 +497,23 @@ RoundResult run_round(Harness& probe, Round& round, MemoryArena& arena, const st
                                          probe.weight(probe.weights.bridge.tg),
                                          probe.weight(probe.weights.bridge.tsv),
                                          dimension(probe.config.bridge.rank)};
+    const auto* policies = static_cast<DspinePolicies>(round.configs.data);
     execution::DspineTailInputs inputs{round.bridge_raw,  round.bridge_rms,
                                         round.bridge_message, round.proposal_hidden,
                                         round.anchors,    round.draw_positions,
-                                        static_cast<const ops::SamplingConfig*>(
-                                            round.configs.data)};
+                                        policies};
     execution::DspineTailOutputs outputs{round.out_drafts, round.out_candidates,
                                           round.out_proposal_q};
     execution::dspine_propose_tail(view, inputs, outputs, arena, probe.cuda());
 
-    std::vector<std::int32_t> drafts(std::size_t(round.drafts * kBatch));
+    std::vector<std::int32_t> drafts{std::size_t(round.drafts * kBatch)};
     probe.download(drafts.data(), round.out_drafts, drafts.size() * sizeof(std::int32_t));
     if (rotate_drafts) std::rotate(drafts.begin(), drafts.begin() + 1, drafts.end());
 
-    std::vector<float> proposal_q(std::size_t(kSlots) * round.drafts * kBatch);
+    std::vector<float> proposal_q{std::size_t(kSlots) * round.drafts * kBatch};
     probe.download(proposal_q.data(), round.out_proposal_q,
                    proposal_q.size() * sizeof(float));
-    std::vector<std::int32_t> candidates(std::size_t(kSlots) * round.drafts * kBatch);
+    std::vector<std::int32_t> candidates{std::size_t(kSlots) * round.drafts * kBatch};
     probe.download(candidates.data(), round.out_candidates,
                    candidates.size() * sizeof(std::int32_t));
     // The contract the accept op relies on over the layouts the round publishes (the engine's
@@ -559,8 +568,8 @@ int main(const int argc, char** argv) {
         std::printf("skip: NINFER_TEST_DEVICE=%d, %d visible\n", device, visible);
         return 77;
     }
-    const std::int32_t rounds =
-        std::max<std::int32_t>(8, std::stoi(setting("NINFER_TEST_ROUNDS", "12"))));
+    const std::int32_t requested = std::stoi(setting("NINFER_TEST_ROUNDS", "12"));
+    const std::int32_t rounds    = requested < 8 ? 8 : requested;
     try {
         Harness probe(path, device);
         world = &probe;
