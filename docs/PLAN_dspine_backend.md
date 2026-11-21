@@ -44,11 +44,16 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 - done: plan; 4 reviews (self / verifier `mwpxt2ws` / D-14 drafter-swap /
   `mwpya6mp` coherence); spine verified (D-01 license, D-05 T=0.9, D-02 map,
   5090-fits, D-14 drafter-swap); fixes → **D-10..14**
-- next: **P1** → (a) port the converter + build the **V3-fused DSpine draft
-  artifact** (D-06: TG/TSV from the V3 lm_head), (b) exec-path stage 1 = load
-  side (`--spec dspine` selects a real backend, artifact opens + inventories).
-  Then **P2**: draft forward + serial tail + `speculative_accept` wiring +
-  state/graph, T=0 byte-exact, **V3-native A/B on a5000-2** (the accept gate).
+- P1-converter: **DONE + MERGED** `c66874d2` (D-20) — artifacts live at
+  `/home/kv/models/dspine-v3/`: `…_dspine-nvfp4tables.ninfer` (**1.3157 GiB**,
+  the D-14 sizing) + `…_dspine.ninfer` (**2.1667 GiB** BF16-table fallback,
+  **+0.85 GiB ⇒ ~60k fewer KV tokens** on the 18,432 B/tok model).
+- P1-load (exec path stage 1): in flight (`mwq06q8i-1e9a`), resumed after a
+  GPU-0 (prod) mishap; 684 lines already on disk in `/tmp/ninfer-dspine-impl`.
+- next: **P2** = draft forward + serial tail + `speculative_accept` wiring +
+  state/graph, T=0 byte-exact, **V3-native A/B on a5000-2** (the accept gate);
+  **P2 must FIRST prove the NVFP4 gather/dequant table path** (P0b left it
+  unmeasured; the 1.3157 GiB sizing depends on it — D-20).
 - P0a: **MERGED** `d6d04746` (from `1138e8b2`): 14 files +746/−5, host build
   743/743 `sm_120a`, 6 ops linked, `--spec dspine` [1,15]; R5 drift = 5 rename
   families ⇒ **survivable, R5 retired**.
@@ -215,6 +220,24 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   are numerically faithful.** Merged: `d6d04746` (P0a), `f3846a56` (P0b).
   **Recorded gaps** (carry to P2, do not rediscover): NVFP4 gather/dequant
   table path is UNMEASURED (BF16 path only); FP8 head tested at uniform scale.
+
+- **D-2026-11-21-20** — **V3-tailored DSpine artifact BUILT (P1 converter).**
+  `/home/kv/models/dspine-v3/`: **`…_dspine-nvfp4tables.ninfer` = 1.3157 GiB**
+  (D-14's 1.35 GiB, −2.5 %) and **`…_dspine.ninfer` = 2.1667 GiB** (BF16 gather
+  tables). **Tailoring proven**: TG recomputed from the V3 target head
+  (`weight/000243`, `q8_g32_fp16/row_split_k128_v1`, sha256 `0f6a64c4…`) =
+  **248,320/248,320 rows identical** to the shipped table; from the *stock* 27B
+  head = **0/248,320** (rel-Frobenius 0.0231). `fuse_dspine_draft.py` refuses a
+  V3 suffix against the stock tower, naming both checksums. TSV is **head-free**
+  (codebook × gates) ⇒ **TG is the only head-carrying table** — every
+  "V3-tailored" claim is a TG claim. Deterministic at a fixed `--artifact-id`.
+  **`⚠` D-14's 1.35 GiB presumes the NVFP4-TABLES build**, i.e. the engine's
+  DSpine gather path must dequantize NVFP4 rows — **the exact path P0b recorded
+  as UNMEASURED**. If P2 uses the BF16-table build instead: **+0.85 GiB drafter
+  ⇒ ~60k fewer device-KV tokens**. P2 owns this (gate on the NVFP4 gather path
+  first). Also: DSpine's target taps = **`[1,16,31,46,61]`**, NOT prod DFlash2's
+  `[5,19,33,47,61]`; fork scripts blocked on an `fp8_e4m3fn` target head (ours
+  is `q8_g32`) and on foreign format tokens — both fixed in the port.
 
 ## OBJECTIVE
 
