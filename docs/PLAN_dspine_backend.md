@@ -56,11 +56,11 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   enforced). `⚠` **OPEN: the config parser** rejects the recipe vocabulary
   (`unknown member code_bridge_second_pass`, format-independent) ⇒ **neither real
   artifact loads end-to-end yet**; in flight `mwq3m3kc-c280`.
-- `⚠` **dgemma window (main-agent decision, deviates from "bounce per task")**:
-  remaining device work is contiguous and P3 needs the slot anyway; repeated
-  24 GiB/66 GiB up-down is riskier than one bounded window. **a5000-11 stays down
-  through it — hard rule: device work idle >30 min or P3 abandoned ⇒ restore
-  immediately and record it.**
+- `⚠` **dgemma window**: `a5000-11` is down; **restore is blocked by the RAM
+  guard** (needs 76 GiB, 72 available with basalt warm 73.5 + prod 53). Rule
+  (D-29): **attempt restore at every opportunity, record each refusal with the
+  numbers**; do NOT shrink a reserve at night. Note for the user: a 66 GiB reserve
+  for a 24 GB lane does not fit beside a warm basalt expert cache.
 - `⚠` **RAM is a live constraint**: the forward harness holds ~42 GiB RSS; the
   guard refused a `a5000-11` restore at MemAvailable 39 GiB (needs 66 + 10). A
   device window that loads the artifact must budget **RAM, not just VRAM**.
@@ -467,6 +467,27 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   one *downstream* (kernels → gather tables → binding → config parser). **The
   artifact load path had never been walked end-to-end before tonight.** Walk it in
   one place, with one owner, before sizing any window off it.
+
+- **D-2026-11-21-29** — **TWO INCIDENTS from the overnight watchdog (both real, both
+  bounded).** (1) **Prod GPU0 logged a driver VRAM OOM at 06:25** (`NVRM GPU0
+  NV_ERR_NO_MEMORY` ×5, ctx_buf_pool + pmaAllocatePages): a subagent (the P1-load
+  agent `mwq06q8i-1e9a`, killed 06:25) attempted an allocation on **device 0**
+  before I pinned it to CPU-only. **Prod never degraded** — `health=200`
+  throughout, GPU0 still 488 MiB free, **no Xid, no restart, no lane event** — the
+  driver refused the context and the test failed, which is the intended outcome.
+  `⚠` **Rule formalized (applies to every brief from now on, and to P3):** any
+  brief that may touch CUDA must state **`CUDA_VISIBLE_DEVICES=1`** explicitly,
+  must forbid device 0 by name, and the digest must **cite the device index
+  observed** as evidence. A green compile/test on the wrong GPU is a fail.
+  (2) **`a5000-11` was down ~1 h, breaching my own 30-min bound.** Not a service
+  decision: **the RAM guard refuses it** (needs **66 + 10 headroom = 76 GiB**,
+  MemAvailable was 39 GiB when the forward harness held 42 GiB, and **72 GiB** now
+  with basalt warm at **73.5 GiB RSS** + prod at 53 GiB + an active `-j4` build).
+  `⚠` **Bound replaced by a rule that can actually be met**: *attempt the restore
+  at the first moment the guard permits, retry on every event, and record each
+  refusal with the exact numbers* — a reserve that cannot fit under basalt's warm
+  expert cache is a fleet-sizing observation for the user, not something I may fix
+  by shrinking `ram_reserve_gib` at night.
 
 ## OBJECTIVE
 
