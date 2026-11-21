@@ -37,6 +37,9 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
+- P2 stage 2: **partial** — host core + policy plumbing committed (`076e9cb4`),
+  device tail op preserved as WIP (`55062599`, unbuilt/unverified). **New kernel
+  in the prod path ⇒ parity debt (D-22) must clear in the GPU window.**
 - phase: **P2 IN FLIGHT** (stage 1 draft forward `mwq1d681-8aff` + stage 2
   serial tail/accept `mwq1dnet-ca79`, both `opus-5`, CPU-only; stage 3 = graph/
   state + decode-loop integration after they land). **P0 gate PASSED** (P0b
@@ -262,6 +265,27 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   state_image/ple) unmeasured CPU-only — device tests need the GPU window.
   (d) Known env gap (not ours): 8 python-oracle tests need
   jsonschema/tokenizers/torch/jinja2 in the CMake-discovered interpreter.
+
+- **D-2026-11-21-22** — `⚠` **THE FORK'S PORTED TAIL IS GREEDY-ONLY — D-05's premise
+  needs an amendment, and the T=0.9 path is a NEW kernel.** P2 stage 2
+  (`mwq1dnet-ca79`, killed mid-run) found that the two ported ops
+  `dspine_serial_scores` + `dspine_serial_chain` are the **greedy pair**
+  (argmax / deterministic walk). D-05's "the serial tail natively samples under
+  the request policy" is true of **Tencent's `propose.py:114-152`
+  (`serial_sample_chain`)**, NOT of the fork ops we ported. Since prod runs
+  **T=0.9**, the sampled path had to be written: a new device op
+  (`dspine_serial_tail`, +219 lines in `src/ops/dspine_bridge/`) with a
+  **host-core CPU oracle** (`src/models/common/dspine/dspine_serial_tail.cpp`,
+  334 lines, no CUDA includes) that doubles as the unit-test target and as
+  **the reference the kernel must reproduce**. It reuses the engine's existing
+  counter-based sampler purpose (`kSamplePurposeDFlash2Proposal` == 5) and the
+  joint top-k / strict-prefix top-p / min-p order of `propose.py:73-90`.
+  `⚠` **CONSEQUENCE — a new parity debt**: P0b verified only the **greedy** ops;
+  the op production will actually use is **UNVERIFIED**. This is P0b-class work
+  (GPU window), not a tolerance question, and it is a **precondition of the
+  accept gate**: an unverified T=0.9 tail makes the A/B's DSpine arm
+  uninterpretable. R1 ("T=0.9 accept math = LOW risk") is **re-rated: not
+  closed** until the tail op is parity-checked against the CPU oracle on GPU.
 
 ## OBJECTIVE
 
