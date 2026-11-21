@@ -37,17 +37,30 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- phase: **P0 — LAUNCHED** (P0a port-ops + P0b parity-ref, both on `opus-5`);
-  P0c **SKIPPED by user decision (D-17)** → the **P2 V3-native A/B is the
-  accept gate**
+- phase: **P1 — LAUNCHED** (converter/V3-fused draft artifact + exec-path
+  stage 1, both on `opus-5`). **P0 COMPLETE: gate PASSED** (P0b verdict
+  **SOUND**). P0c **SKIPPED by user decision (D-17)** → the **P2 V3-native A/B
+  is the accept gate**
 - done: plan; 4 reviews (self / verifier `mwpxt2ws` / D-14 drafter-swap /
   `mwpya6mp` coherence); spine verified (D-01 license, D-05 T=0.9, D-02 map,
   5090-fits, D-14 drafter-swap); fixes → **D-10..14**
-- next: **P0 gate = P0b parity** (relaunch `mwpzha6z-2324`; DIVERGENT ⇒ STOP)
-  → P1 dev (exec path + converter)
-- P0a: **DONE/green** — `feat/dspine-port` `1138e8b2` (14 files, +746/−5),
-  full host build 743/743 `sm_120a`, 6 ops linked, `--spec dspine` [1,15]
-  validates; R5 drift = 5 rename families, survivable. **Not yet merged.**
+- next: **P1** → (a) port the converter + build the **V3-fused DSpine draft
+  artifact** (D-06: TG/TSV from the V3 lm_head), (b) exec-path stage 1 = load
+  side (`--spec dspine` selects a real backend, artifact opens + inventories).
+  Then **P2**: draft forward + serial tail + `speculative_accept` wiring +
+  state/graph, T=0 byte-exact, **V3-native A/B on a5000-2** (the accept gate).
+- P0a: **MERGED** `d6d04746` (from `1138e8b2`): 14 files +746/−5, host build
+  743/743 `sm_120a`, 6 ops linked, `--spec dspine` [1,15]; R5 drift = 5 rename
+  families ⇒ **survivable, R5 retired**.
+- P0b: **MERGED** `f3846a56` (from `76cae6de`): compiled-op oracle on GPU 1 vs
+  Tencent reference. `prepare_read.normalized`, `normalize_codes`, `message`,
+  `serial_scores.idx`, `serial_chain.drafts` = **BIT-EXACT**; `prepare_read.rms`
+  31–33 fp32 ulp, `finish.normed` ≤2 ulp, `finish#0` residual 215 × 1-ulp
+  signed-zero = **EQUIVALENT-ORDER**; 20 mutants all DIVERGENT (2578/640/32817
+  ulp; serial_scores 227-240 idx; chain 15/15) ⇒ **teeth proven**.
+  **Unmeasured (recorded):** NVFP4 codebook/tg/tsv gather path (BF16 tables
+  only), vocab 1024 vs ~150k (gather index only, parity-neutral), FP8 head
+  uniform scale 1.0.
 - fail-safe: P0c skipped ⇒ **no cheap early accept abort**; the first accept
   numbers now arrive at **P2 V3-native**. If R4 looks real, the K-sweep sweep
   on a5000-2 (P2) is the earliest abort point.
@@ -188,6 +201,20 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   DIVERGENT** — only DIVERGENT is a kill-switch. Relaunched `mwpzha6z-2324`.
   Rule added: **a red parity suite is never greened by widening a tolerance**;
   and subagents **commit while red** (attempt 1 lost all its work).
+
+- **D-2026-11-21-19** — **P0 GATE PASSED (parity SOUND).** P0b `mwpzha6z-2324`:
+  all 6 ops measured CUDA-vs-Tencent-reference on GPU 1 — the ops that carry
+  rounding points (`prepare_read.normalized`, `normalize_codes.codes`,
+  `message`, `serial_scores.idx` incl. FP8-E4M3 dequant + 2 reductions +
+  argmax, `serial_chain.drafts`) are **BIT-EXACT**; the reductions
+  (`prepare_read.rms` 31–33 fp32 ulp, `finish.normed` ≤2 ulp, `finish#0`
+  residual 215 × 1-ulp signed-zero) are **EQUIVALENT-ORDER** with the
+  reduction-order difference named (256-thread tree vs NumPy pairwise,
+  `rsqrtf`). D-18's transcription path is confirmed void (it was the artifact
+  of the failure, not a fork defect). **No DIVERGENT case ⇒ the fork's kernels
+  are numerically faithful.** Merged: `d6d04746` (P0a), `f3846a56` (P0b).
+  **Recorded gaps** (carry to P2, do not rediscover): NVFP4 gather/dequant
+  table path is UNMEASURED (BF16 path only); FP8 head tested at uniform scale.
 
 ## OBJECTIVE
 
