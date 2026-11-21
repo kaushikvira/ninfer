@@ -9,15 +9,19 @@ class Bindings;
 
 namespace ninfer::models::dspine {
 
+// A DSpine draft layer is bound apart. The shipped artifacts carry one packed projection object
+// per block and name its ranges - `attention/query|key|value`, the two context ranges that alias
+// the K and V ranges, and `mlp/gate|up` - so the drafter runs the projections apart over the one
+// materialized object. No fused copy of a draft weight exists in memory or in this struct.
 struct AttentionWeights {
-    WeightId query_key_value;
+    WeightId query, key, value, context_key, context_value;
     WeightId query_norm, key_norm, output;
 };
 
 struct BlockWeights {
     WeightId input_norm, post_attention_norm;
     AttentionWeights attention;
-    WeightId gate_up, down;
+    DenseWeights mlp;
 };
 
 struct BridgeWeights {
