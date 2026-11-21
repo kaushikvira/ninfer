@@ -99,11 +99,14 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- phase: **P2 — walk DONE (`e2c2aa42`), T=0 divergence OPEN** (`mwqh6cy5-b72d`, opus-5,
-  worktree `/home/kv/work/wt-dspine-t0`, GPU 1 = 25.4 GiB, `a5000-11` down for it).
-  The walk publishes **15 real drafts** at T=0.9 and T=0; **but `serial_chain` over the
-  walk's own `idx` ≠ the T=0 tail arm** (D-39, red 2) ⇒ criterion 4 is blocked on
-  deciding which rule is right per `propose.py:73-152`.
+- phase: **P2 — walk DONE, T=0 identity RESTORED (D-40); MEASURING accepted/round**
+  (`mwqiks2e-4ba3`, opus-5, `/home/kv/work/wt-dspine-round`, GPU 1 = 25.4 GiB,
+  `a5000-11` down for it). Task: implement the **round reset** (residual stream is
+  refined in place — pass N+1 currently refines what pass N left), then measure
+  **accepted drafts/round over N≥32 rounds** at prod policy + a T=0 arm.
+- **THE BAR (D-40, measured not assumed)**: prod DFlash2 **K=7 = 2.998 accepted/round**
+  over 214,153 live rounds ⇒ **≈4.0 tok/round**. DSpine drafts **K=15** with a
+  block-16-trained drafter. **Criterion ⑤ = beat 3.0 accepted/round.**
 - gate (P3, D-26): **3 / 5** — ①tail K1+K2 ✅ ②NVFP4 gather ✅ ③forward: *load half* ✅ /
   *walk* ⏳ ④whole-round + T=0 byte-exact ⬜ ⑤DSpine ≥ DFlash2 K7 ⬜ **never measured**.
 - **P3 authorization: granted (D-26), NOT exercised — prod untouched all night.**
