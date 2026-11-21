@@ -303,27 +303,27 @@ int rejects_bad_geometry() {
     expect_throw(
         [&] {
             Tensor narrow(d_cand.span(), DType::I32, {batch, drafts, 15});
+            Tensor dft(d_drafts.span(), DType::I32, {batch, drafts});
             ops::dspine_serial_tail(table_tensor, narrow, device_configs,
                                     Tensor(d_pos.span(), DType::I32, {batch}),
-                                    Tensor(d_drafts.span(), DType::I32, {batch, drafts}), q_tensor,
-                                    idx_tensor, nullptr);
+                                    dft, q_tensor, idx_tensor, nullptr);
         },
         "15-wide candidate axis");
     expect_throw(
         [&] {
+            Tensor dft(d_drafts.span(), DType::I32, {batch, drafts});
+            Tensor q15(d_q.span(), DType::FP32, {batch, drafts, 15});
             ops::dspine_serial_tail(table_tensor, Tensor(d_cand.span(), DType::I32, {batch, drafts, kSlots}),
                                     device_configs, Tensor(d_pos.span(), DType::I32, {batch}),
-                                    Tensor(d_drafts.span(), DType::I32, {batch, drafts}),
-                                    Tensor(d_q.span(), DType::FP32, {batch, drafts, 15}),
-                                    idx_tensor, nullptr);
+                                    dft, q15, idx_tensor, nullptr);
         },
         "q with a 15-wide candidate axis");
     expect_throw(
         [&] {
+            Tensor dft(d_drafts.span(), DType::I32, {batch, drafts});
             ops::dspine_serial_tail(table_tensor, Tensor(d_cand.span(), DType::I32, {batch, drafts, kSlots}),
                                     nullptr, Tensor(d_pos.span(), DType::I32, {batch}),
-                                    Tensor(d_drafts.span(), DType::I32, {batch, drafts}), q_tensor,
-                                    idx_tensor, nullptr);
+                                    dft, q_tensor, idx_tensor, nullptr);
         },
         "null sampling configs");
     return failures;
