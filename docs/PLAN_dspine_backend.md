@@ -60,11 +60,14 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   name and built a lane-swap plan on it — deleted). opus-5/basalt = the backbone,
   alive in every phase (basalt = never-down policy).
 - **D-2026-11-21-03** — GPU geometry. End-state **5090 (32 GB) only**:
-  fixed 22.8 (V3 artifact) + 1.35 (DSpine NVFP4 tables) + ~2.5 → KV absorbs the
-  rest → ~31.5 GiB, **fits** (fork measured 8.59 GiB free on a 5090). KV
-  830k→~680k tokens = **2.6× max concurrent ctx — accepted**.
-  `⚠` **SUPERSEDED by D-10** — the 830k/680k/2.6× is **FALSE** (stale 8.9
-  KiB/tok). True: 489k→~300k = **0.28×**. The "fits" verdict SURVIVES. Dev/P0–P2 on **GPU 1**
+  `⚠` **SUPERSEDED by D-14 (whole entry)** — its additive fixed-cost
+  decomposition is void; the canonical VRAM model is D-14 below. (The old
+  830k/680k/2.6× figures were the stale-8.9-KiB/tok bug.)
+  **CANONICAL 5090 budget (D-14 drafter-swap, USE THIS):** DSpine **replaces**
+  DFlash2 → weights `22.80 − (DFlash2 2.407) + (DSpine 1.35) = 21.74 GiB` +
+  `~3.0` graphs/ctx → **KV ≈ 7.6 GiB → ~429k tok (0.41× concurrent, ABOVE
+  today's 0.35×)**. Net **−1.06 GiB** vs prod. The 26.7 / additive figures
+  below are a **CONSERVATIVE FLOOR, not the net cost**. Dev/P0–P2 on **GPU 1**
   (a5000-2 test lane; `lane down a5000-11` → 30 GiB free, basalt stays up). 5090
   window (P3): prod → **a5000-2 (identical V3 artifact**, `model_id
   a5000-2-qwen27`, model-id flip in pi-config, no nginx change).
@@ -98,8 +101,10 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   2 (k+v) × (128 data + 16 scale) nvfp4); **live** device pool
   `9,011,277,824 B / 18,432 = 489k` tok (host 53.7 GiB). End-state
   `32.6−(22.8+1.35+~0.7)=5.2 GiB ≈ 300k tok`. Concurrent set = 4×262,144 = 1.05M
-  → today **0.46×**, end-state **0.28×** (NOT 2.6×). **"fits" survives**
-  (26.7 < 32 GiB; fork's 8.59 GiB free corroborates, stock tower).
+  → today **0.46×**, end-state **0.28×** (NOT 2.6×). **`⚠` the `0.28×` +
+  `26.7 < 32 GiB` are the ADDITIVE FLOOR — the 300k / 0.28× are SUPERSEDED by
+  D-14's swap (net −1.06 GiB → ~429k / 0.41×). The "fits" verdict SURVIVES —
+  more comfortably under the swap.**
 - **D-2026-11-21-11** — `⚠` **P0c infeasible as written** (B1). a5000-2 is a
   NInfer/`dflash2` lane (no DSpine in any NInfer build → STATUS's "lane up
   a5000-2 = the probe" self-contradicts). DSpine merged vLLM **2026-11-16**;
@@ -206,7 +211,7 @@ work lives in the worktree/commit, readable on demand.
 
 | Subagent (role) | model | work | returns |
 |---|---|---|---|
-| **port-ops** | sonnet-5 (5090 idle) | port `dspine_bridge` to a worktree of `416-ebdc67e5`; patch drift; build | build green + drift notes + commit |
+| **port-ops** | `opus-5` (basalt — `sonnet-5` runs prod, NOT idle: m2) | port `dspine_bridge` to a worktree of `416-ebdc67e5`; patch drift; build | build green + drift notes + commit |
 | **parity-ref** | sonnet-5 | PyTorch reference, bit-exact vectors, test file | pass/fail + files |
 | **impl-<stage>** | sonnet-5 | exec path: load/forward/tail/accept (1 stage each) | diff + test green + decisions |
 | **test-runner** | sonnet-5 | build+test loop; fix; re-run | digest w/ final result |
@@ -232,7 +237,9 @@ bench, grep, or run long loops (EXECUTION MODEL).
 `70afbf33`), docs committed. Spine VERIFIED true — do NOT re-litigate: D-01
 (EAGLE-4 license anti-porting = blocking), D-05 (T=0.9 via native
 `serial_sample_chain`), D-02 (model→lane map, self-consistent), 5090-fits
-(26.7 < 32 GiB fixed). **Do NOT re-derive the map from `models.json`** — the
+**(D-14 drafter-swap model: 21.74 weights → ~429k KV / 0.41×; the 26.7 additive
+figure is a conservative FLOOR — size P3 off D-14, not 26.7)**. **Do NOT
+re-derive the map from `models.json`** — the
 `name:` fields are stale metadata, NOT routing truth (the D-02 `⚠` correction).
 Obey every `⚠`: D-02 map · D-10 (2.6× FALSE — units bug; **additive model
 SUPERSEDED by D-14**) · D-11 (P0c infeasible as written) · D-12 (P3 stand-in =
@@ -347,7 +354,9 @@ READ-FIRST, in order, before acting:
 2. Do NOT re-derive the model->lane map from `pi-config/models.json` (its
    `name:` fields are metadata, NOT the router; see the D-02 `⚠`).
 3. Do NOT re-litigate the verified spine: D-01 (EAGLE-4 license blocks
-   porting), D-05 (T=0.9 native), D-02 (map), 5090-fits.
+   porting), D-05 (T=0.9 native), D-02 (map), 5090-fits. For any VRAM/KV sizing
+   USE D-14 (drafter-swap: 21.74 weights, ~429k KV / 0.41×, ABOVE today); the
+   26.7 additive figure is a conservative FLOOR, not the net cost.
 
 FIRST GATE: ask the user ONE decision - P0c (D-11): (a) fresh vLLM + NVFP4
 27B, (b) 8B fallback, or (c) skip -> P2 is the gate (lean). Do NOT ask the KV
