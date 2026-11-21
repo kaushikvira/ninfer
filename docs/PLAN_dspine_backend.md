@@ -17,9 +17,9 @@ feat/dspine-spec-backend` · `[ -d /tmp/ninfer-dspine-review ] || git clone
 --depth 1 https://github.com/mengwuzhuanshou/ninfer-windows-dspine
 /tmp/ninfer-dspine-review` · confirm `hostname`=turin (run local, do NOT ssh).
 
-**STOP-AND-ASK the user the 2 gates first** (HANDOFF): (1) KV headroom
-0.28×–0.39× acceptable? (D-10) (2) P0c (a) invest / (b) 8B / (c) skip→P2 (D-11).
-Do NOT self-decide them. **Never self-approve a promotion** (P2→P3, P4) — the
+**FIRST GATE = P0c** (HANDOFF): (a) fresh vLLM + NVFP4 27B / (b) 8B / (c)
+skip→P2. **Ask only THIS** — the 5090 KV gate is **MOOT by D-14** (drafter-swap
+−1.06 GiB, KV **GAINS** 0.35×→0.41×). Do NOT self-decide gates. **Never self-approve a promotion** (P2→P3, P4) — the
 user decides at each gate. Then run PHASES; launch fan-out with the
 COPY-PASTE subagent prompts; fan-out rides **`opus-5`** (m2: the 5090 runs
 prod, `sonnet-5` is NOT idle), GPU-1 serialized, one writer/file, check running
@@ -233,9 +233,10 @@ bench, grep, or run long loops (EXECUTION MODEL).
 `serial_sample_chain`), D-02 (model→lane map, self-consistent), 5090-fits
 (26.7 < 32 GiB fixed). **Do NOT re-derive the map from `models.json`** — the
 `name:` fields are stale metadata, NOT routing truth (the D-02 `⚠` correction).
-Obey every `⚠`: D-02 map · D-10 (2.6× is FALSE — units bug; real 0.28×–0.39×) ·
-D-11 (P0c infeasible as written) · D-12 (P3 stand-in = half prod's KV) · D-13
-(pin rev `260a6c23`).
+Obey every `⚠`: D-02 map · D-10 (2.6× FALSE — units bug; **additive model
+SUPERSEDED by D-14**) · D-11 (P0c infeasible as written) · D-12 (P3 stand-in =
+half prod's KV) · D-13 (pin rev `260a6c23`) · **D-14 (drafter-SWAP: DSpine
+1.35 < DFlash2 2.407 GiB = −1.06 → DSpine CHEAPER than prod, KV GAINS)**.
 
 **Model routing (D-02 + m2).** `opus-5`(basalt) = backbone, alive ALL phases.
 `sonnet-5`(5090) runs PROD through P0–P2 → **NOT idle — do NOT schedule fan-out
@@ -243,19 +244,15 @@ on it.** P0–P2 fan-out rides **`opus-5`** (shared with the main agent); `haiku
 5-5`(a5000-11) is DOWN in P0–P2. `deepseek-flash` = paid, rare. GPU-1 is a
 **shared, serialized** resource (one lane-agent at a time).
 
-**FIRST ACTION — get these 2 decisions from the user (do NOT self-decide).**
+**FIRST ACTION — ONE gate: P0c (D-11) (do NOT self-decide; do NOT ask the KV
+gate — it's MOOT).**
 
-1. **KV headroom (D-10).** The earlier "2.6× is good enough" sign-off was built
-   on a units bug and **must be re-opened.** Real: today 489k device-KV tok
-   (0.46× the 4-concurrent set); DSpine's 1.35 GiB draft ≈ −74k → **end-state
-   300k (floor) … ~415k (0.28×–0.39×)** = a ~15% trim, NOT an 83% collapse.
-   **ASK:** is 0.39× (floor 0.28×) acceptable as the 5090 end-state? (host cache
-   50 GiB absorbs spill; the risk is preemption/recompute.)
-   ✅ **RESOLVED by D-14 — the gate is MOOT (it's a GAIN).** DSpine *replaces*
-   DFlash2 (2.407 GiB) with a **1.35 GiB** drafter = **−1.06 GiB** → device KV
-   **GROWS** (0.35×→0.41×, above today). No VRAM/KV sign-off needed — DSpine is
-   cheaper than prod on VRAM.
-2. **P0c (D-11).** Infeasible as written (a5000-2 is a NInfer/dflash2 lane — no
+> **VRAM/KV gate — CLOSED (no sign-off needed).** D-14: DSpine *replaces*
+> DFlash2 (2.407 GiB) with **1.35 GiB** = **−1.06 GiB** → device KV **GROWS**
+> (0.35×→0.41×, above today). **DSpine is CHEAPER than prod on VRAM.** (Supersedes
+> the D-10 additive model.)
+
+1. **P0c (D-11).** Infeasible as written (a5000-2 is a NInfer/dflash2 lane — no
    DSpine; the probe must be vLLM; fleet nightly ≈Oct-24 < the Nov-16 merge;
    BF16/H100 fits no GPU). **ASK, options:**
    - **(a)** invest the probe (fresh vLLM nightly ≥Nov-16 + **NVFP4 27B** +
@@ -351,11 +348,9 @@ READ-FIRST, in order, before acting:
 3. Do NOT re-litigate the verified spine: D-01 (EAGLE-4 license blocks
    porting), D-05 (T=0.9 native), D-02 (map), 5090-fits.
 
-FIRST ACTION: ask the user the 2 gates in HANDOFF -
-(1) KV headroom: is 0.28x-0.39x the 5090 end-state acceptable? (D-10 - the
-    "2.6x" sign-off was a units bug); (2) P0c (D-11): (a) fresh vLLM + NVFP4
-    27B, (b) 8B fallback, or (c) skip -> P2 is the gate (lean).
-Do NOT self-decide them.
+FIRST GATE: ask the user ONE decision - P0c (D-11): (a) fresh vLLM + NVFP4
+27B, (b) 8B fallback, or (c) skip -> P2 is the gate (lean). Do NOT ask the KV
+gate - it is MOOT (D-14: drafter-swap -1.06 GiB, KV GAINS). Do NOT self-decide.
 
 Model routing (m2): fan-out rides `opus-5` (basalt) - `sonnet-5` = the 5090
 runs PROD (NOT idle); `haiku-5-5` down in P0-P2; `deepseek-flash` paid/rare.
