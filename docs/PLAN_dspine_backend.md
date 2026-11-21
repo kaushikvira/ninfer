@@ -13,16 +13,13 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- phase: **P0 (de-risk spike) — not started**
-- done: plan written; branch `feat/dspine-spec-backend` created
-- next: launch P0 fan-out (subagents do the bulk; main reads digests) —
-  **port-ops** (`dspine_bridge` → worktree of `416-ebdc67e5`) + **parity-ref**
-  (PyTorch bit-exact vectors vs `Tencent/DSpine/dspine_mlx/.../reference.py`)
-  parallel; **P0c** fleet gate after (`lane down a5000-11` → GPU-1 ≥35 GiB →
-  `lane up a5000-2` → stock-target accept probe, main-only lane ops).
-  Kill-switch: parity-ref not bit-exact ⇒ STOP.
-- open-risks: R5 upstream-drift, R3 Swift-1.5-tower acceptance (both P0-gated)
-- last-gate: — (none passed)
+- phase: **P0 — GATED on 2 user decisions; NOT launched** (see **HANDOFF**)
+- done: plan; 3 reviews (self / verifier `mwpxt2ws` inline + full); spine
+  verified (D-01 license, D-05 T=0.9, D-02 map, 5090-fits); fixes → **D-10..13**
+- next: **get 2 user decisions → P0a+P0b fan-out (opus-5) → P0c per D-11**
+- open-risks: R5 drift (8–10 wk, MED) · R3 V3-tower accept (P2) · **P0c
+  feasibility (D-11)**
+- last-gate: verifier → **SOLID-WITH-FIXES**; all fixes recorded; 2 gates open
 
 ## DECISION LEDGER (append-only; `⚠` = a correction, obey it)
 
@@ -40,7 +37,9 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 - **D-2026-11-21-03** — GPU geometry. End-state **5090 (32 GB) only**:
   fixed 22.8 (V3 artifact) + 1.35 (DSpine NVFP4 tables) + ~2.5 → KV absorbs the
   rest → ~31.5 GiB, **fits** (fork measured 8.59 GiB free on a 5090). KV
-  830k→~680k tokens = **2.6× max concurrent ctx — accepted**. Dev/P0–P2 on **GPU 1**
+  830k→~680k tokens = **2.6× max concurrent ctx — accepted**.
+  `⚠` **SUPERSEDED by D-10** — the 830k/680k/2.6× is **FALSE** (stale 8.9
+  KiB/tok). True: 489k→~300k = **0.28×**. The "fits" verdict SURVIVES. Dev/P0–P2 on **GPU 1**
   (a5000-2 test lane; `lane down a5000-11` → 30 GiB free, basalt stays up). 5090
   window (P3): prod → **a5000-2 (identical V3 artifact**, `model_id
   a5000-2-qwen27`, model-id flip in pi-config, no nginx change).
@@ -68,6 +67,30 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 - **D-2026-11-21-09** — **Resync a5000-2 to prod `416-ebdc67e5` before the
   P3/P4 window** (prod-on-a5000-2 = prod-parity, not the stale `77c2e5e2`); P4
   resyncs a5000-2 back to the DSpine build.
+
+- **D-2026-11-21-10** — `⚠` **RE-BASE D-03** (supersedes its 830k/680k/2.6×,
+  stale 8.9 KiB/tok). Verified: 18,432 B/tok (16 full-attn of 64 × 4 kv-heads ×
+  2 (k+v) × (128 data + 16 scale) nvfp4); **live** device pool
+  `9,011,277,824 B / 18,432 = 489k` tok (host 53.7 GiB). End-state
+  `32.6−(22.8+1.35+~0.7)=5.2 GiB ≈ 300k tok`. Concurrent set = 4×262,144 = 1.05M
+  → today **0.46×**, end-state **0.28×** (NOT 2.6×). **"fits" survives**
+  (26.7 < 32 GiB; fork's 8.59 GiB free corroborates, stock tower).
+- **D-2026-11-21-11** — `⚠` **P0c infeasible as written** (B1). a5000-2 is a
+  NInfer/`dflash2` lane (no DSpine in any NInfer build → STATUS's "lane up
+  a5000-2 = the probe" self-contradicts). DSpine merged vLLM **2026-11-16**;
+  fleet vLLM nightly ≈2026-10-24 → P0c needs a **fresh nightly (≥Nov-16,
+  ≥34 GB pull)**; the PR validates **BF16 on H100** (54 GiB, fits no GPU) → P0c
+  needs an **NVFP4 27B + FLASHINFER (SM120, unvalidated → fallback plan)**; the
+  **131072 ctx cap** = probe-validity limit. Fix: P0c = explicit fresh-vLLM-
+  nightly + NVFP4 target + 131k, **NOT zero-cost**.
+- **D-2026-11-21-12** — **P3 5090-window co-sizing** (refines BLOCKER-1). Measured
+  basalt 47 + tts 1 (not 39/3), a5000-11 down → GPU-1 free **28.5** (not 30/35).
+  a5000-2 ~22 non-KV + 2 headroom + **4.5 KV = 250k tok = 0.24× concurrent (half
+  prod's 489k)** + 23 GiB host cache → **fits 70.8/71.7, no tts drop**. The prod
+  stand-in runs **HALF prod's device KV** (more preemption/recompute) — state
+  explicitly + P4 restore check.
+- **D-2026-11-21-13** — Re-pin draft weights to rev **`260a6c23`**
+  (`DSpineDraftModel` config); `30de2dad` declares `DFlashDraftModel` (stale).
 
 ## OBJECTIVE
 
@@ -164,6 +187,57 @@ NEVER main. **If main reads >1k lines of bulk, it broke the contract.**
 digests → commit (subagents commit worktree; I squash-merge) → update STATUS →
 gate (human)`. One read + N digests per phase — bounded main context.
 
+## HANDOFF — instructions for the next main agent (READ-FIRST)
+
+**Re-entry:** STATUS → the ledger `⚠` lines (corrections — **obey**) →
+**EXECUTION MODEL** → **HANDOFF** → act. You are the control plane: launch
+subagents, read digests, gate, run lane ops. You do NOT read bulk code, build,
+bench, grep, or run long loops (EXECUTION MODEL).
+
+**State.** Plan is durable on `feat/dspine-spec-backend` (base `main`
+`70afbf33`), docs committed. Spine VERIFIED true — do NOT re-litigate: D-01
+(EAGLE-4 license anti-porting = blocking), D-05 (T=0.9 via native
+`serial_sample_chain`), D-02 (model→lane map, self-consistent), 5090-fits
+(26.7 < 32 GiB fixed). **Do NOT re-derive the map from `models.json`** — the
+`name:` fields are stale metadata, NOT routing truth (the D-02 `⚠` correction).
+Obey every `⚠`: D-02 map · D-10 (2.6× is FALSE — units bug; real 0.28×–0.39×) ·
+D-11 (P0c infeasible as written) · D-12 (P3 stand-in = half prod's KV) · D-13
+(pin rev `260a6c23`).
+
+**Model routing (D-02 + m2).** `opus-5`(basalt) = backbone, alive ALL phases.
+`sonnet-5`(5090) runs PROD through P0–P2 → **NOT idle — do NOT schedule fan-out
+on it.** P0–P2 fan-out rides **`opus-5`** (shared with the main agent); `haiku-
+5-5`(a5000-11) is DOWN in P0–P2. `deepseek-flash` = paid, rare. GPU-1 is a
+**shared, serialized** resource (one lane-agent at a time).
+
+**FIRST ACTION — get these 2 decisions from the user (do NOT self-decide).**
+
+1. **KV headroom (D-10).** The earlier "2.6× is good enough" sign-off was built
+   on a units bug and **must be re-opened.** Real: today 489k device-KV tok
+   (0.46× the 4-concurrent set); DSpine's 1.35 GiB draft ≈ −74k → **end-state
+   300k (floor) … ~415k (0.28×–0.39×)** = a ~15% trim, NOT an 83% collapse.
+   **ASK:** is 0.39× (floor 0.28×) acceptable as the 5090 end-state? (host cache
+   50 GiB absorbs spill; the risk is preemption/recompute.)
+2. **P0c (D-11).** Infeasible as written (a5000-2 is a NInfer/dflash2 lane — no
+   DSpine; the probe must be vLLM; fleet nightly ≈Oct-24 < the Nov-16 merge;
+   BF16/H100 fits no GPU). **ASK, options:**
+   - **(a)** invest the probe (fresh vLLM nightly ≥Nov-16 + **NVFP4 27B** +
+     FLASHINFER/SM120 [**unvalidated** → 8B fallback] + 131k ctx cap)
+   - **(b)** 8B stock-target fallback (weaker kill-switch)
+   - **(c)** **skip P0c → the P2 V3-native A/B is the gate** (main's lean: P0c's
+     signal is weak, 131k cap + unvalidated SM120; P2 measures the thing that
+     matters, V3-native)
+
+**Then, on go → launch P0:**
+- `port-ops` (model `opus-5`) — port the public DSpine **1596 LOC** → a
+  worktree of `416-ebdc67e5`, patch drift, build. *(R5 drift)*
+- `parity-ref` (model `opus-5`, parallel) — PyTorch bit-exact vectors vs
+  `Tencent/DSpine/dspine_mlx/.../reference.py`. **Kill-switch: not bit-exact ⇒
+  STOP.**
+- fan-out = `opus-5` only; **check running agents before launch; GPU-1
+  serialized; one writer per file.** P0c follows per the decision.
+- **P0 gate = parity green** (P0b) ⇒ P1. Commit STATUS at every gate.
+
 ## SELF-REVIEW (2026-11-21, main) — fixes to apply
 
 - **BLOCKER-1 (D-03 GPU co-sizing).** P3/P4 prod-on-a5000-2 full-ctx `36 +
@@ -208,6 +282,19 @@ gate (human)`. One read + N digests per phase — bounded main context.
     guarantee a number. **P0 = go/no-go, not ~15–20 as a promise.**
 - **VERDICT:** no blockers; D-02 reaffirmed; **plan SOLID** with the committed
   fixes (self-review BLOCKER-1/MAJOR-2-3, verifier #1–#4). Ready for P0.
+
+## VERIFIER DETAIL (2026-11-21, full report — supersedes the summary)
+
+Confirmed: **M1** (2.6× false → D-10), **B1** (P0c infeasible → D-11), **M2**
+(P3 stand-in KV-starved → D-12). Minors (adopted): free **28.5** GiB not
+30/35; "5090 idle" false (it runs prod through P0–P2); **haiku-5-5
+unavailable as P2 relief** (a5000-11 is down in P0–P2 — use sonnet-5 for P2
+fan-out); **4.75@K=7** = the K=15 number (K=7 ≈ 4.0–4.5; live accept 37.7% →
+~2.6 tok/round on a hot-cache window → the ">~5" bar is a **bigger gap**);
+R5 = **8–10 wk** drift (not 7). **Fan-out rule (m6):** main checks running
+agents (`task_control list`/STATUS) before launch — no duplicate fan-out on a
+resource; **GPU-1 serialized**; ledger is the sole append-only section.
+EFFORT 10–14 = **optimistic**, schedule risk = **P0c + R5**, not the port.
 
 ## REFERENCES
 
