@@ -15,6 +15,9 @@ target_sources(ninfer_ops PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n16384_k5120/a16.cu"
   "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n16384_k5120/a4.cu"
   "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n16384_k5120/shape.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n6144_k5120/a16.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n6144_k5120/a4.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n6144_k5120/shape.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/operands.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/q4_q5/shapes/n4096_n12288_k5120/mma.cu"
   "${CMAKE_CURRENT_LIST_DIR}/q4_q5/shapes/n4096_n12288_k5120/shape.cpp"
@@ -31,6 +34,7 @@ target_sources(ninfer_ops PRIVATE
 target_sources(ninfer_ops_non_rdc PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n14336_k5120/a4_tma.cu"
   "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n16384_k5120/a4_tma.cu"
+  "${CMAKE_CURRENT_LIST_DIR}/nvfp4/shapes/n6144_k5120/a4_tma.cu"
 )
 
 include("${CMAKE_CURRENT_LIST_DIR}/bf16/${NINFER_TARGET}/sources.cmake")

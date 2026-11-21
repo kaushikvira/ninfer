@@ -15,7 +15,7 @@ const std::array kShapes{
 #if NINFER_TARGET_RTX5090
     &kNvfp4N28672K5120, &kNvfp4N5120K14336,
 #endif
-    &kNvfp4N5120K6144,  &kNvfp4N5120K17408,
+    &kNvfp4N5120K4096,  &kNvfp4N5120K6144,  &kNvfp4N5120K17408, &kNvfp4N5120K25600,
 };
 
 const Nvfp4LinearShape& resolve_shape(std::int32_t n, std::int32_t k, LinearPolicy policy) {

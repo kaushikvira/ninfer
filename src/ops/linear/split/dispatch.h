@@ -44,7 +44,8 @@ extern const SplitShape kQ8SplitN6144K2560;
 extern const SplitShape kQ4Q5SplitN7168N7168K5120, kQ4Q5SplitN4096N12288K5120;
 extern const SplitShape kFp8SplitN14336K5120, kFp8SplitN16384K5120;
 extern const SplitShape kFp8SplitN14976K5120, kFp8SplitN2176K5120;
-extern const SplitShape kNvfp4SplitN14336K5120, kNvfp4SplitN16384K5120;
+extern const SplitShape kNvfp4SplitN14336K5120, kNvfp4SplitN16384K5120,
+    kNvfp4SplitN6144K5120;
 
 extern const SplitShape kMxfp8SplitN20480K1536;
 extern const SplitShape kFp8BlockBf16SplitN16384N4096K1536;
