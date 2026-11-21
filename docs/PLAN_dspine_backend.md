@@ -1172,6 +1172,31 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   `test_dspine_tail_cost.cpp`'s device setup **verbatim** (D-47: hand-rolled setups hung
   twice).
 
+- **D-2026-11-21-50** — **THE FIDELITY PROBE WORKS AND FOUND THE NEXT LAYER: the executor's
+  binding refuses every multi-use weight.** `mwqwc6w0-2a54` died mid-run but left a
+  **working** probe (committed `d0dac61d` in `wt-dspine-fidelity`) that binds the executor's
+  **own** `DspineParameters` load and censuses every drafter parameter. Measured:
+  **the shard loads — 712 objects, 20.43905 GiB, h2d 1.52 s** (`device free 25113 → 4183
+  MiB`) — and **all 46 projection parameters bind `ok`** (5 layers × 9 + `feature_projection`).
+  Then **11 refuse**:
+  `dspine/bridge/{read_weight, early_read_weights, feature_write_weights, gate,
+  predecessor_gate, prev, tg, tsv, codebook}` + `text/{token_embedding, output_head}`
+  → `REFUSED: the parameter carries no single declared use` →
+  `STOP: dspine: dspine/bridge/gate: weight input requires an explicit mathematical use`.
+  **Root cause is a correct rule**: `models/common/weights.cpp:18` throws when
+  `weight_input(weights, WeightId)` sees `uses.size() != 1`; `output_head` declares **2**
+  uses and each bridge table is shared by **several** ops ⇒ the intended path is the
+  **explicit-use overload** `weight_input(weights, WeightUseId{parameter, use_index})`,
+  i.e. **per-consumer use SELECTION**, which is exactly what a bridge table needs (a table
+  gathered row-wise is not a matmul operand). Fix in flight `mwr0ndbw-e2d5`, with the rule
+  **locked** (do not relax `weights.cpp:18`) and the use choice required to be **evidence-
+  based**, not `use_index 0`.
+  `⚠` **This is the fifth layer of the same stack** (kernels → gather tables → format →
+  naming → config → **bind-use**), and the probe that found it exists **because** D-49
+  insisted the port was only *structural* until something drove it. Also worth noting: the
+  executor shard needs **20.44 GiB** because it materializes the tower too, so on GPU 1
+  this probe runs with ~4 GiB left — one process at a time, no lane co-residency.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
