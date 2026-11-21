@@ -22,6 +22,9 @@ struct FrameSpec {
     bool causal_scoring               = false;
     bool vision                       = false;
     std::uint32_t control_token_limit = 0;
+    // The code bridge's rank, in the units the DSpine tail's packed message is sized by. Zero for
+    // every other backend: it names a stream only the DSpine arm allocates.
+    std::int32_t dspine_rank            = 0;
 };
 
 struct FrameIngressLayout {
@@ -134,6 +137,15 @@ struct DFlashFrameLayout {
     TensorRegion drafts;
     std::optional<TensorRegion> candidate_ids;
     std::optional<TensorRegion> proposal_q;
+    // The DSpine proposal tail's inputs: the streams the draft layers' LAST fused bridge write
+    // leaves behind, which `dspine_serial_scores` reads as the row-wise state of every sender.
+    // Absent for every other backend: DFlash2's proposal path needs no bridge state, so its
+    // frame layout and byte map are untouched.
+    std::optional<TensorRegion> bridge_raw;
+    std::optional<TensorRegion> bridge_rms;
+    std::optional<TensorRegion> bridge_message;
+    std::optional<TensorRegion> proposal_hidden;
+    std::optional<TensorRegion> draw_positions;
 };
 
 struct FrameHostLayout {
@@ -195,6 +207,8 @@ struct MtpFrame {
 struct DFlashFrame {
     Tensor proposal_ids, proposal_positions, append_positions, append_counts, drafts;
     Tensor candidate_ids, proposal_q;
+    // The DSpine proposal tail's inputs; each is a null Tensor for every other backend.
+    Tensor bridge_raw, bridge_rms, bridge_message, proposal_hidden, draw_positions;
 
     DFlashFrame(MemorySpan backing, const DFlashFrameLayout& layout);
 };

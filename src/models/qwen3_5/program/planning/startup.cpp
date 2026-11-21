@@ -91,7 +91,27 @@ ResourceLayout persistent_layout(const SequencePlanImpl& plan) {
             .value_dim       = config.gdn ? dimension(config.gdn->linear_value_head_dim) : 0,
         };
     }
-    if (plan.features.masked_draft()) {
+    if (plan.features.dspine()) {
+        // DSpine's drafter state. Its five draft layers are all full-context (the drafter
+        // declares no sliding window: models/common/dspine/config.h's sliding_window is zero in
+        // the shipped artifacts), so it takes the paged-context half of the masked-draft state
+        // and no cyclic local state at all. Its feature rows are the same target-tap field the
+        // DFlash2 drafter consumes: hidden_size concatenated over the tap list.
+        const auto& draft              = *profile.config.dspine;
+        spec.state_images.dflash_local = DFlashLocalStateSpec{
+            .layers   = 0U,
+            .capacity = static_cast<std::uint32_t>(draft.sliding_window),
+            .kv_heads = dimension(draft.num_key_value_heads),
+            .head_dim = dimension(draft.head_dim),
+        };
+        spec.dflash = DFlashPersistentSpec{
+            .full_layers  = draft.num_hidden_layers,
+            .kv_heads     = dimension(draft.num_key_value_heads),
+            .head_dim     = dimension(draft.head_dim),
+            .feature_rows = dimension(config.hidden_size *
+                                      static_cast<std::uint64_t>(draft.target_layer_ids.size())),
+        };
+    } else if (plan.features.masked_draft()) {
         const auto& draft              = *profile.config.draft;
         spec.state_images.dflash_local = DFlashLocalStateSpec{
             .layers   = draft.local_layer_count(),
@@ -118,6 +138,9 @@ ResourceLayout persistent_layout(const SequencePlanImpl& plan) {
         .causal_scoring      = plan.causal_scoring,
         .vision              = plan.features.vision,
         .control_token_limit = profile.control_token_limit,
+        .dspine_rank = profile.config.dspine.has_value()
+                           ? static_cast<std::int32_t>(profile.config.dspine->bridge.rank)
+                           : 0,
     };
     spec.context_bytes      = plan.context_bytes;
     spec.host_context_bytes = plan.context_cache.host_capacity_bytes.value_or(0);
@@ -558,6 +581,19 @@ void validate_target_options(const execution::ModelProfile& profile, DeviceConte
             options.speculative.draft_tokens > kMtpDecodeMaximumDrafts) {
             throw std::invalid_argument("MTP draft window must be in [1," +
                                         std::to_string(kMtpDecodeMaximumDrafts) + "]");
+        }
+        break;
+    case SpeculativeBackend::Dspine:
+        // The gate that used to refuse `--spec dspine` at plan time. It now asks the question
+        // the DFlash and DFlash2 arms ask: does this target carry the drafter the option names.
+        if (!profile.config.dspine) {
+            throw std::invalid_argument(
+                "selected masked draft backend is not supported by this target");
+        }
+        if (options.speculative.draft_tokens == 0 ||
+            options.speculative.draft_tokens > kDFlashDecodeMaximumDrafts) {
+            throw std::invalid_argument("masked draft window must be in [1," +
+                                        std::to_string(kDFlashDecodeMaximumDrafts) + "]");
         }
         break;
     case SpeculativeBackend::DFlash:

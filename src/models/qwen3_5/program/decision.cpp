@@ -78,7 +78,14 @@ void RankProgramImpl::decide_decode(std::uint32_t batch_value, std::uint32_t wid
         Tensor counts    = frame.output_counts.slice(0, 0, batch);
         Tensor tokens    = prefix(frame.output_tokens, {width, batch});
         Tensor frontiers = frame.sampling_positions.slice(0, 0, batch);
-        if (backend == SpeculativeBackend::DFlash2) {
+        // The sparse-proposal verifier, shared by both backends that publish a candidate set
+        // with its FP32 q distribution: DFlash2's selector and DSpine's serial tail. One call
+        // site, one argument list, one set of frame streams - and the accepted-token accounting
+        // at publish_result below reads THIS call's counts, so a DSpine round is counted by the
+        // identical arithmetic that produced DFlash2's measured 2.998 accepted/round (D-40). That
+        // identity is the A/B: two backends, one accept op, one formula (D-04: the accept path
+        // is speculative_accept.h; no parallel verifier exists and none is written here).
+        if (backend == SpeculativeBackend::DFlash2 || backend == SpeculativeBackend::Dspine) {
             auto& draft = *frame.dflash;
             ops::speculative_accept_sparse_drafts(
                 argmax, logits, drafts,

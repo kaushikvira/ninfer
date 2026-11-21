@@ -171,11 +171,37 @@ FrameLayout plan_frames(LayoutBuilder& builder, const FrameSpec& spec) {
             add(builder, DType::I32, {width, batch}, "DFlash context append positions");
         draft.append_counts = add(builder, DType::I32, {batch}, "DFlash context append counts");
         draft.drafts        = add(builder, DType::I32, {width - 1, batch}, "DFlash current drafts");
-        if (spec.backend == SpeculativeBackend::DFlash2) {
+        // The two sparse-proposal streams the accept op names by shape ({16,K,B} I32 ids and
+        // FP32 q - src/ops/sampling/acceptance/sparse_drafts/entry.cpp). DFlash2's selector and
+        // DSpine's serial tail publish into the SAME two regions: the shapes are the accept
+        // op's contract, not a backend's, and DFlash2's sizes and order are byte-for-byte as
+        // they were. DSpine drafts K in [1,15] out of a 16-wide block with a 16-way candidate
+        // set (models/common/dspine/dspine_serial_tail.h: kSerialTailSlots), so it needs the
+        // same 16 x K x batch pair.
+        if (spec.backend == SpeculativeBackend::DFlash2 ||
+            spec.backend == SpeculativeBackend::Dspine) {
             draft.candidate_ids =
                 add(builder, DType::I32, {16, width - 1, batch}, "DFlash2 proposal candidates");
             draft.proposal_q =
                 add(builder, DType::FP32, {16, width - 1, batch}, "DFlash2 proposal probabilities");
+        }
+        // The DSpine proposal tail's four input streams (frames.h). `bridge_raw` is the draft
+        // layers' last bridge write's pre-refinement residual, `bridge_rms` its read scale,
+        // `bridge_message` its packed message and `proposal_hidden` the same write's normed
+        // block, whose columns 1..K the tower head scores. `draw_positions` is the tail's
+        // per-row draw coordinate - the same base position the accept op keys its own draws on
+        // (decision.cpp passes frame.sampling_positions), so a round's proposal and verification
+        // draws share one coordinate system, exactly as DFlash2's selector and acceptor do.
+        if (spec.backend == SpeculativeBackend::Dspine) {
+            draft.bridge_raw =
+                add(builder, DType::BF16, {spec.hidden, width, batch}, "DSpine bridge residual");
+            draft.bridge_rms  = add(builder, DType::FP32, {width * batch}, "DSpine bridge scale");
+            draft.bridge_message =
+                add(builder, DType::BF16, {spec.dspine_rank, width, batch},
+                    "DSpine bridge message");
+            draft.proposal_hidden = add(builder, DType::BF16, {spec.hidden, width, batch},
+                                        "DSpine proposal hidden");
+            draft.draw_positions  = add(builder, DType::I32, {batch}, "DSpine draw positions");
         }
     }
 
