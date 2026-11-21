@@ -571,4 +571,49 @@ void dspine_walk(DspineExecutionView view, const DspineWalkInputs& inputs,
     (void)scope;
 }
 
+// The round's peak, term by term, in the order the walk opens its streams. `columns` is the
+// block's width by the batch, and every stream the walk opens for the WHOLE round is one
+// `columns`-wide field, so the arithmetic is a sum of widths, not a scan of the layers: the layers
+// run in scopes of their own, so only the widest of them is ever live.
+std::size_t dspine_round_workspace_bytes(const models::dspine::Config& draft,
+                                         std::int32_t batch, std::int32_t width,
+                                         ops::ContextAttentionExecutionEnvelope envelope,
+                                         std::int32_t multiprocessors) {
+    const auto columns = std::size_t(dimension(batch) * dimension(width));
+    const auto hidden  = dimension(draft.hidden_size);
+    const auto code    = dimension(draft.bridge.code_size);
+    const auto rank    = dimension(draft.bridge.rank);
+    const auto query   = dimension(draft.query_width());
+    const auto key     = dimension(draft.key_width());
+    std::size_t wide = 0;
+    // The walk's round-long streams: the residual and the five [hidden, columns] fields it keeps
+    // alongside it (the hidden, the out projection, the bridge's write, its fused norm, its stash
+    // and its read), the widened field of the SwiGLU mix, the three [query] and three [key] fields
+    // of the attention, the code field in and out, and the packed gate, predecessor and value
+    // block with its message out. Each is bfloat16, plus the read's per-column fp32 scale.
+    wide += 7 * hidden + dimension(draft.intermediate_size) + 3 * query + 3 * key + 2 * code +
+            4 * rank;
+    // The append's round-long pair: the projected taps and the normed field they become, both
+    // [hidden, columns], and the widest of its per-layer scopes - the context key and value and
+    // the key the norm makes, plus the query rows the packed split also writes and drops.
+    wide += 2 * hidden + 3 * key + query;
+    // The A16 staging of the widest projection input the round feeds (the SwiGLU's widened field,
+    // which is wider than the attention out's input and than the bridge's code field at every
+    // shipped geometry), one byte a row - the same slack term the drafter's own round sizes.
+    wide += dimension(draft.intermediate_size) / 2;
+    auto bytes = columns * (wide * 2 + 4);
+    // The one stream of the walk that is not a width times columns field: the layer's attention
+    // over the drafter's paged context, whose workspace the op's own capacity names.
+    const ops::AttentionHeadGeometry geometry{dimension(draft.head_dim),
+                                              dimension(draft.num_attention_heads),
+                                              dimension(draft.num_key_value_heads)};
+    (void)multiprocessors;   // the paged context attention's capacity is a function of the
+                             // envelope and the block, not of the machine's grid (the op's own
+                             // capacity note says so); the parameter stays because the drafter's
+                             // round sizing passes it and a local attention may need it.
+    bytes += ops::context_softmax_attention_workspace_capacity_bytes(
+        geometry, envelope, dimension(width), dimension(width), dimension(batch));
+    return bytes;
+}
+
 } // namespace ninfer::models::qwen3_5::execution

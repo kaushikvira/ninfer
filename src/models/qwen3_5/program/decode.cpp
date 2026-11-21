@@ -29,19 +29,14 @@ Tensor dense_prefix(const Tensor& tensor, std::initializer_list<std::int32_t> sh
 
 void RankProgramImpl::append_draft_history(ComputeOperation& operation) {
     if (!resources.dflash) return;
-    // The DSpine arm of the gate that this seam opened. DSpine shares the masked-draft frame and
-    // the drafter's paged context state (planning/startup.cpp:113), so this call is reached by a
-    // DSpine round - and its body is the DFlash2 context append, which reads
+    // DSpine shares the masked-draft frame and the drafter's paged context state
+    // (planning/startup.cpp:113), so this call is reached by a DSpine round. Everything below the
+    // block-arrangement scan is backend-generic - it packs the target's tap field out of the
+    // residency state with `prepare_ragged_prefix` and hands the three streams to the backend's
+    // own context append - and the DFlash2 body of that append is what reads
     // `parameters.profile->config.draft` (execution/draft.cpp:44) and `parameters.draft->` (ibid
-    // :96,:98,:109): both empty for a DSpine profile, whose two drafter configs are populated
-    // mutually exclusively (models/common/dspine/config.h:96-97). The five DSpine draft layers
-    // are probe-only (D-43's open item (c)), so there is no DSpine context append to call. Named
-    // out loud here rather than read through a nullopt.
-    if (backend == SpeculativeBackend::Dspine)
-        throw std::logic_error(
-            "DSpine has no draft-context append: its five draft layers are probe-only, so the "
-            "engine decode loop cannot yet run a DSpine round (the measured seam is "
-            "execution::dspine_propose_tail, driven by the accept probe)");
+    // :96,:98,:109), both empty for a DSpine profile (models/common/dspine/config.h:96-97). DSpine
+    // takes the sibling arm at execution::dspine_append_context, named in the overload below.
     const bool forward    = std::holds_alternative<ForwardWork>(operation.request.work.operation);
     const auto batch      = forward ? 1 : static_cast<int>(operation.shape.rows);
     std::uint32_t minimum = std::numeric_limits<std::uint32_t>::max(), maximum = 0;
@@ -71,6 +66,21 @@ void RankProgramImpl::append_draft_history(std::uint32_t batch_size,
                                frame.backend_frontiers.slice(0, 0, batch),
                                frame.frontiers.slice(0, 0, batch), features, positions, counts,
                                device.execution_view());
+    if (backend == SpeculativeBackend::Dspine) {
+        // The DSpine drafter's context update: the target-tap field is projected and normed once
+        // and each of its five layers then appends its own context key and value to its own paged
+        // pages, which are the pages its layer's attention reads. It takes the drafter's paged
+        // context and no cyclic State records at all - the drafter declares no sliding window
+        // (planning/startup.cpp:113-120) - so it takes `backend_table_rows` for the page-table row
+        // and no `state_destination_offsets`.
+        if (!state.full)
+            throw std::logic_error("DSpine draft context: the drafter has no paged context");
+        execution::dspine_append_context(
+            execution::DspineExecutionView{parameters, resources.work, device.execution_view(),
+                                           &*state.full},
+            features, positions, counts, frame.backend_table_rows.slice(0, 0, batch), envelope);
+        return;
+    }
     execution::draft_append_context(draft_view(*this), features, positions, counts,
                                     frame.state_destination_offsets.slice(0, 0, batch),
                                     frame.backend_table_rows.slice(0, 0, batch), envelope);
@@ -113,13 +123,62 @@ void RankProgramImpl::run_dflash_draft(std::uint32_t batch_value, std::uint32_t 
 // candidate_ids and proposal_q in the frame's accept-layout streams - the same three streams
 // decide_decode then hands `speculative_accept_sparse_drafts`, which is why the accepted-token
 // accounting needs no DSpine arm at all (decision.cpp:204-211 reads the accept op's counts).
-void RankProgramImpl::run_dspine_draft(std::uint32_t batch_value) {
+// The DSpine round: the five draft layers, then the proposal tail. Two executor calls, in the
+// order the round's data flows:
+//
+//   execution::dspine_walk          the mask block, the embedding, the five layers over the
+//                                  drafter's own paged context (the pages the per-round
+//                                  append_draft_history filled), the code bridge after each of
+//                                  them; it publishes the last write's stash, scale, message and
+//                                  normed block into the frame's five DSpine streams.
+//   execution::dspine_propose_tail  the tower head's top-16, the score table over the real tg and
+//                                  tsv, the sampled tail, and the layout bridges into the accept
+//                                  op's own contract.
+//
+// BATCH 1, WRITTEN DOWN RATHER THAN HIDDEN. The tail's `bridge_message` input is handed
+// `draft.bridge_message` UNPREFIXED a few lines below (the frame's region is
+// {dspine_rank, width, batch_capacity} at program/frames.cpp:196-203, so the Tensor the tail sees
+// has ne[2] = the frame's capacity, not this round's batch). At batch 1 the two are the same
+// grid; at batch > 1 the tail reads the message of a wider block than the walk wrote, which is a
+// silent wrong-proposal bug, not a loud one. So this seam REFUSES a batch above one, in words, at
+// the call site. Everything on the accept side of it (drafts, candidate_ids, proposal_q) and the
+// walk's own geometry are already batch-shaped; the widening is one `slice` at the tail's input
+// and a re-check of the tail's own shape gate - recorded here, and in D-45 where the same
+// limitation is recorded, and deliberately not taken in this stage.
+void RankProgramImpl::run_dspine_draft(std::uint32_t batch_value, std::uint32_t minimum,
+                                        std::uint32_t maximum) {
     auto& frame = resources.frame;
     auto& draft = *frame.dflash;
     const int batch = static_cast<int>(batch_value);
     const auto& dspine = parameters.profile->config.dspine;
     if (!parameters.dspine || !dspine)
         throw std::logic_error("run_dspine_draft: the model carries no dspine drafter");
+    if (batch != 1)
+        throw std::logic_error(
+            "DSpine drafts one sequence per round: the frame's bridge message region is read "
+            "unprefixed by the batch (program/frames.cpp:196-203), so batch > 1 would share one "
+            "row's proposal across the block. The DFlash2 arm of this loop is the batched one.");
+    if (!resources.dflash || !resources.dflash->full)
+        throw std::logic_error("run_dspine_draft: the drafter has no paged context");
+    const auto width = static_cast<int>(draft_window) + 1;
+    // The walk, on the drafter's own paged context. Its context lengths, page-table rows and
+    // validity are the drafter half of the frame - the same trio the DFlash2 drafter's full
+    // context reads - and its envelope is the one the decode loop computed for this round.
+    const execution::DspineWalkInputs walk_inputs{
+        frame.anchors.slice(0, 0, batch), frame.frontiers.slice(0, 0, batch),
+        frame.valid_columns.slice(0, 0, batch), frame.backend_table_rows.slice(0, 0, batch)};
+    execution::DspineWalkOutputs walk_outputs{
+        dense_prefix(draft.proposal_ids, {width, batch}),
+        dense_prefix(draft.proposal_positions, {width, batch}),
+        dense_prefix(draft.bridge_raw, {frame.spec.hidden, width, batch}),
+        dense_prefix(draft.bridge_rms, {width * batch}),
+        dense_prefix(draft.bridge_message, {int(dspine->bridge.rank), width, batch}),
+        dense_prefix(draft.proposal_hidden, {frame.spec.hidden, width, batch})};
+    execution::dspine_walk(
+        execution::DspineExecutionView{parameters, resources.work, device.execution_view(),
+                                       &*resources.dflash->full},
+        walk_inputs, walk_outputs,
+        ops::ContextAttentionExecutionEnvelope{minimum, maximum});
     const execution::DspineTailView view{parameters.text.output_head.weight,
                                          parameters.dspine->final_norm,
                                          parameters.dspine->gate_bias,
@@ -141,6 +200,7 @@ void RankProgramImpl::run_dspine_draft(std::uint32_t batch_value) {
                      {draft.proposal_q.ne[0], static_cast<int>(draft_window), batch})};
     execution::dspine_propose_tail(view, inputs, outputs, resources.work,
                                    device.execution_view());
+    CUDA_CHECK(cudaGetLastError());
 }
 
 void RankProgramImpl::begin_draft(ComputeOperation& operation) {
@@ -160,7 +220,7 @@ void RankProgramImpl::begin_draft(ComputeOperation& operation) {
     } else if (backend == SpeculativeBackend::Mtp) {
         begin_mtp_draft(operation);
     } else if (backend == SpeculativeBackend::Dspine) {
-        run_dspine_draft(operation.shape.rows);
+        run_dspine_draft(operation.shape.rows, minimum, maximum);
     } else {
         run_dflash_draft(operation.shape.rows, minimum, maximum);
     }
