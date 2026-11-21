@@ -1422,6 +1422,79 @@ VERDICT(kernels sound/NOT - the kill-switch) · RISKS(rounding points where
 the fork may deviate). No file dumps.
 ```
 
+## D-49 (2026-11-22, main) — the DSpine round is EXECUTOR code: the walk, the draft-context append, and what is still unmeasured
+
+**The two gaps the P2 brief named are closed in code, in three commits on
+`feat/dspine-exec` (off `982c2cb6`, worktree `~/work/wt-dspine-exec`, build
+`~/work/wt-dspine-exec-build` — D-32/D-41: the build dir is under `~/work`, not `/tmp`).**
+
+1. `23cc0534`+ `execution/parameters.{h,cpp}` — `DspineTailParameters` → **`DspineParameters`**, now
+   carrying the drafter's five layers (`DspineBlockParameters`, the packed Q/K/V parent + the
+   SwiGLU pair, exactly as `Prepare::block` binds DFlash2's) and the code bridge
+   (`DspineBridgeParameters`). The two stacked bridge objects are sliced **per layer at bind time**
+   (`Prepare::stacked(id, layer, rows, cols)`, which requires the object to be one contiguous
+   `[depth, rows, cols]`), the same `native_weight`-over-a-parent-range mechanism
+   `core/weight_bank.cpp:117` uses for MoE experts. **No weight is copied**: `read[L-1]` is
+   `w.bridge.read_weight`, the codebook/`tg`/`tsv`/`gate_bias`/norms are views. The population site
+   is the shard-open path (`parameters.cpp:368`, `if (w.dspine)`), so the drafter reaches the
+   executor through the real open, not through a probe.
+2. `53f09fa9` `execution/dspine.{h,cpp}` — **`dspine_append_context`** (the target-tap field →
+   `feature_projection` → `context_norm` → per-layer context K/V out of the packed parent →
+   key norm → RoPE → `kv_cache_append_prefix`) and **`dspine_walk`** (masked block, embedding,
+   5 x {split Q/K/V, q/k head norms + RoPE, **paged context attention over the drafter's own
+   pages**, out + residual, post norm, SwiGLU, down} each followed by the 7-step bridge), both
+   ported step-for-step from `test_dspine_forward_real.cpp` so the probe stays the parity harness.
+   The `decode.cpp:31` throw is gone. `dspine_round_workspace_bytes` sizes the round's arena peak.
+3. `bcad6034` `program/decode.cpp` — `append_draft_history`'s DSpine arm calls the append (the
+   body below the block-arrangement scan was already backend-neutral); `run_dspine_draft` runs
+   **walk then tail**; `planning/startup.cpp` reserves the walk's transients.
+
+**The DFlash2 surface is the three removed comment-and-throw lines, and each is provably no-op**
+(`53f09fa9`/`bcad6034`): every added line is in a dspine-only function, a dspine-only struct, or
+the `if (w.dspine)` / `if (plan.features.dspine())` / `backend == Dspine` arm.
+
+**Measured (ran on GPU 1 against the real artifact, this tree):**
+
+| probe | result |
+|---|---|
+| `dspine_forward_real` (the parity harness, **untouched**) | **green, 22/22 checks, 3514 steps walked** — the walk port did not move it |
+| `dspine_tail_cost` | green; whole-round K=15 = **1.543 ms** (D-48's 1.607, same arm), exponent 0.053 |
+| `dspine_loading_real` / `dspine_real` / `dspine_shapes_real` | green (binding, 1.31568 GiB footprint, 16/16 shapes) |
+| full suite build | **1067/1067 targets, 0 errors** |
+
+**NOT measured — say it plainly: `dspine_walk` has never executed.** No probe drives it, and the
+decode-loop arms that do are behind a target tower (24 GiB) that cannot coexist with the drafter
+on this box (the 27B V3 artifact is drafter-and-tower; the free 25 GiB is the drafter's 1.32 GiB
+plus headroom, not the tower's). The port is therefore a **structural** port: step order, op
+identity and shapes taken from the probe, not a bit-parity claim. The next executable step is a
+probe that drives `dspine_append_context` + `dspine_walk` + `dspine_propose_tail` over
+`parameters.dspine` on the real artifact for >=32 rounds and compares the four published frame
+streams against the probe's own walk — the D-45 harness pattern, with D-47's setup warning
+(`test_dspine_tail_cost.cpp` copied verbatim, not hand-rolled).
+
+**Three decisions recorded here so they are not rediscovered:**
+- **the round zero (D-42).** `dspine_propose_tail` now `cudaMemsetAsync`es its `proposal_q` grid
+  at the round's top. `dspine_serial_tail` writes **only the walked sender row per slot**
+  (`src/models/common/dspine/dspine_serial_tail.cpp:258-268`), step 5 publishes the **whole** grid
+  as the accept op's `proposal_q`, so an un-zeroed grid publishes the previous round's sender rows
+  — the exact property D-42 measured as `0 of 37 streams part`. The probe gets this from its
+  `reset_round`; the round was missing it.
+- **batch 1, in words at the call site.** The tail's `bridge_message` input is handed
+  `draft.bridge_message` **unprefixed** a few lines below, so at batch > 1 the tail reads the
+  message of a wider block than the walk wrote — a silent wrong-proposal bug, not a refusal. The
+  seam refuses batch > 1 loudly (D-45 recorded the limitation; the widening is one `slice` plus a
+  re-check of the tail's shape gate, deliberately not taken here).
+- **the context Q is computed and dropped.** The drafter's context needs only K and V, which are
+  the 2nd and 3rd ranges of the packed Q/K/V object; `linear_pair`/`linear_n` cannot read them
+  (D-35's geometry finding: at T=16 only the packed parent and `linear_split` are compiled), so the
+  split writes the Q rows into a scratch stream that is freed. A measured cost of the missing
+  context geometry, not a silent one.
+
+**The 5-layer walk's per-round transients are NOT free**: at K=15, batch 1 the round's arena peak
+is `~2.6 MiB` of streams (7 x [hidden, columns] + [intermediate, columns] + the bridge fields) —
+small against the reserve, which is why the reserve is a sizing term and not a risk. The
+`make docs-check` gate is green on this commit.
+
 ## REFERENCES
 
 fork: github.com/mengwuzhuanshou/ninfer-windows-dspine (bridge ops,
