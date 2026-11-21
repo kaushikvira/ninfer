@@ -61,7 +61,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **1.31568 GiB** (= D-14 −2.5 %) / 2.16674 GiB BF16 twin. **Sizing rule: count
   objects, not binding names** (D-30's 2.112 GiB figure was a name-sum overcount).
   **P3 criterion 3 = half green (load half); the forward is the open half.**
-- `⚠` **dgemma window**: `a5000-11` is down; **restore is blocked by the RAM
+- **`a5000-11` DOWN IS INTENTIONAL RIGHT NOW** (not drift, not a blocked restore):
+  bounced by main for the forward task `mwq6hti0-4872`, which needs GPU 1's
+  **25.5 GiB** (dgemma holds 24 GiB VRAM). **Rule: restore `a5000-11` immediately
+  when that task ends** (`./lane up a5000-11`; the RAM guard is open now). Any
+  watchdog/main resurrection must read this line before re-flagging it.
+- `⚠` **dgemma history**: it was down >1 h earlier when **restore was blocked by the RAM
   guard** (needs 76 GiB, 72 available with basalt warm 73.5 + prod 53). Rule
   (D-29): **attempt restore at every opportunity, record each refusal with the
   numbers**; do NOT shrink a reserve at night. Note for the user: a 66 GiB reserve
