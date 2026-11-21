@@ -37,10 +37,13 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- phase: **P1 — LAUNCHED** (converter/V3-fused draft artifact + exec-path
-  stage 1, both on `opus-5`). **P0 COMPLETE: gate PASSED** (P0b verdict
-  **SOUND**). P0c **SKIPPED by user decision (D-17)** → the **P2 V3-native A/B
-  is the accept gate**
+- phase: **P1 COMPLETE — P2 next** (draft forward + serial tail + accept +
+  state/graph, then the V3-native A/B = the accept gate). **P0 gate PASSED**
+  (P0b **SOUND**); P0c **SKIPPED by user (D-17)**. Branch `feat/dspine-spec-backend`
+  = 8 commits ahead of `main`, **unpushed**.
+- `⚠` **P2 GPU reality**: GPU 0 = 488 MiB free (prod), GPU 1 = 380 MiB free
+  (basalt 47.4 + dgemma 21.8 + tts). **No GPU work is possible without stopping
+  a5000-11 (dgemma)** — a user decision, not a main-agent move.
 - done: plan; 4 reviews (self / verifier `mwpxt2ws` / D-14 drafter-swap /
   `mwpya6mp` coherence); spine verified (D-01 license, D-05 T=0.9, D-02 map,
   5090-fits, D-14 drafter-swap); fixes → **D-10..14**
@@ -48,8 +51,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   `/home/kv/models/dspine-v3/`: `…_dspine-nvfp4tables.ninfer` (**1.3157 GiB**,
   the D-14 sizing) + `…_dspine.ninfer` (**2.1667 GiB** BF16-table fallback,
   **+0.85 GiB ⇒ ~60k fewer KV tokens** on the 18,432 B/tok model).
-- P1-load (exec path stage 1): in flight (`mwq06q8i-1e9a`), resumed after a
-  GPU-0 (prod) mishap; 684 lines already on disk in `/tmp/ninfer-dspine-impl`.
+- P1-load (exec path stage 1): **DONE + MERGED** `d593e5e8` (from `a42f28b5`):
+  `--spec dspine` binds the draft, validates inventory, reports `dspine_bytes()`;
+  rejects a DFlash2 artifact / missing component. Build green (0 warnings);
+  CPU-only suite 81 P / 9 F / 112 S — **all 9 failures pre-existing** (8 =
+  python-oracle deps missing in the CMake interpreter, 1 = `expert_cache` has
+  no CPU-only skip; both reproduce on `b7c909fa`).
 - next: **P2** = draft forward + serial tail + `speculative_accept` wiring +
   state/graph, T=0 byte-exact, **V3-native A/B on a5000-2** (the accept gate);
   **P2 must FIRST prove the NVFP4 gather/dequant table path** (P0b left it
@@ -238,6 +245,18 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   first). Also: DSpine's target taps = **`[1,16,31,46,61]`**, NOT prod DFlash2's
   `[5,19,33,47,61]`; fork scripts blocked on an `fp8_e4m3fn` target head (ours
   is `q8_g32`) and on foreign format tokens — both fixed in the port.
+
+- **D-2026-11-21-21** — **P1 COMPLETE. P2 obligations named.** (a) **DFlash2
+  runtime is NOT exercised** — the 3 `real` dflash2 tests skip without
+  `NINFER_TEST_ARTIFACT`, so the only DFlash2 evidence is the synthetic
+  `dflash2_path_unchanged` guard + unchanged bodies. **P2 must re-run the real
+  DFlash2 baseline before the accept gate** (it is the A/B's control arm).
+  (b) **NVFP4 gather/dequant path still unmeasured** (P0b: BF16 tables only) —
+  the 1.3157 GiB sizing (D-20) depends on it; measure it inside P2, not after.
+  (c) 112 skips = the whole ops/device surface (moe/qsa/softmax/gdn/kv/
+  state_image/ple) unmeasured CPU-only — device tests need the GPU window.
+  (d) Known env gap (not ours): 8 python-oracle tests need
+  jsonschema/tokenizers/torch/jinja2 in the CMake-discovered interpreter.
 
 ## OBJECTIVE
 
