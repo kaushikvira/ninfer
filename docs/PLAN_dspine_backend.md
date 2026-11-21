@@ -116,6 +116,15 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 - **D-2026-11-21-13** — Re-pin draft weights to rev **`260a6c23`**
   (`DSpineDraftModel` config); `30de2dad` declares `DFlashDraftModel` (stale).
 
+- **D-2026-11-21-14** — `⚠` **DRAFTER-SWAP — D-10's additive model is WRONG.**
+  DSpine **replaces** DFlash2; measured (artifact bindings, physical bytes, 0
+  overlap): **DFlash2 drafter 2.407 GiB** (2.074 + 0.333 proposal head) vs
+  **DSpine 1.35 GiB** → **−1.06 GiB — DSpine is CHEAPER than prod, not
+  costlier.** So the 22.80 artifact **shrinks** → device KV **GROWS** ~62k tok
+  (measured model: today ~367k / live-pool 489k → **~429k, 0.35×→0.41×** the
+  concurrent set). **DSpine end-state is BETTER than DFlash2 today** on VRAM +
+  KV. Closes the KV gate (D-10 re-open).
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
@@ -242,6 +251,10 @@ on it.** P0–P2 fan-out rides **`opus-5`** (shared with the main agent); `haiku
    300k (floor) … ~415k (0.28×–0.39×)** = a ~15% trim, NOT an 83% collapse.
    **ASK:** is 0.39× (floor 0.28×) acceptable as the 5090 end-state? (host cache
    50 GiB absorbs spill; the risk is preemption/recompute.)
+   ✅ **RESOLVED by D-14 — the gate is MOOT (it's a GAIN).** DSpine *replaces*
+   DFlash2 (2.407 GiB) with a **1.35 GiB** drafter = **−1.06 GiB** → device KV
+   **GROWS** (0.35×→0.41×, above today). No VRAM/KV sign-off needed — DSpine is
+   cheaper than prod on VRAM.
 2. **P0c (D-11).** Infeasible as written (a5000-2 is a NInfer/dflash2 lane — no
    DSpine; the probe must be vLLM; fleet nightly ≈Oct-24 < the Nov-16 merge;
    BF16/H100 fits no GPU). **ASK, options:**
