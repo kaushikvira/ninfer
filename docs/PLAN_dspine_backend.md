@@ -156,7 +156,10 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **merge gate = build the merged tree + second `ninja` "no work to do" + registration
   sweep + suite at baseline (7 known)** (D-36/D-38) · **`/tmp` is tmpfs — worktrees under
   `/home/kv/work/wt-*`, merged ones removed, every branch pushed at first commit**
-  (D-32) · **`a5000-11` down only while a device task runs, restore at its end**
+  (D-32) · **`a5000-11` (dgemma) STAYS DOWN by USER DECISION (2026-11-22) until the A/B
+  completes** — no per-task bouncing; restore once the a5000-2/5090 arm is finished and
+  record it. **Consequence stated plainly: dgemma (memory + Jev decisions) is unavailable
+  for the duration.** GPU 1 holds ~25.4 GiB free for device work
   · baseline CPU suite **7 known failures** (all missing python deps).
 - `⚠` known defects, recorded not hidden: **A4 at K=25600 is 34 % off fp64 for T ≥ 1024**
   (bounded → A16 above T=1023; prefill perf) · the **A4 quantizer is a SECOND shape
