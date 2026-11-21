@@ -936,6 +936,44 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   engine-loop DSpine generation is the lane's first piece; (d) **no CUDA graph profile
   for DSpine** — it runs eager with three D2H/H2D layout crossings per round.
 
+- **D-2026-11-21-44** — **GATE: merge-safe for DFlash2 — but the new DSpine seam CANNOT
+  EXECUTE (three defects), and the CPU suite's real net is 83 tests, not 172.**
+  `mwqmfis4-1b5d` at `d75cbc36`, fresh build dir (`/home/kv/work/ninfer-gate-d75cbc36`,
+  the poisoned `build/rtx5090-dev` left untouched): **2608 edges, exit 0**; suite
+  **83 P / 82 S / 7 F of 172** — the 7 are exactly the known python-dep set, **zero
+  outside it**, and the shape matches `b689e4e0`'s log test-for-test (the 8→7 delta is
+  my own `expert_cache` relabel, D-38). The `src/` diff is **additive-by-construction**
+  for every non-DSpine backend: 4 widened gates (`load_options.h:32`/`:60-63`,
+  `decision.cpp:87`, `frames.cpp:175-176`, `startup.cpp:94`) each add a `|| Dspine`
+  term or a new first arm, so DFlash2's value, frame byte-map, accept call and
+  `persistent_layout` arm are **textually unchanged**.
+  `⚠` **CAVEAT THAT MUST TRAVEL WITH EVERY CPU-SUITE CLAIM TONIGHT**: **82 of the 172
+  "CPU" tests SKIP for want of a device and ctest counts a skip as a pass** ⇒ the real
+  CPU net is **83 executed tests**. More importantly, **0 DFlash2 RUNTIME assertions
+  ran** (all device/artifact-gated: `#87/#88/#91/#74/#76` skip 77, `#139` accept op
+  skips, `#138` masked_block, `#14` decode graphs) — so a runtime regression confined to
+  the **shared accept call site, the decode graph bodies, or the 13
+  `is_masked_draft_backend` consumers** would be invisible to every check performed.
+  The gate said so plainly rather than calling it a pass.
+  `⚠` **THREE DSpine-ONLY DEFECTS (none fires on the DFlash2 path; none reachable on
+  CPU)** — the seam is **compile-verified but cannot execute**:
+  (a) **`frames.cpp:265-272`** — `DFlashFrame`'s ctor binds only the six pre-existing
+  regions; the **five new regions allocated at `frames.cpp:196-204` are never bound** ⇒
+  `decode.cpp:118-122` hands `run_dspine_draft` **null Tensors** and
+  `execution/dspine.cpp:118-121` throws.
+  (b) **`startup.cpp:368`** — derefs `*profile.config.draft` under the now-widened
+  `masked_draft()` with no `dspine()` guard (cf. the guarded `:114`), and
+  `config.draft`/`config.dspine` are populated **mutually exclusively** ⇒ **nullopt
+  deref at plan time**.
+  (c) **`graph_bodies.cpp:55-63`** — `bodies.draft` has **no DSpine arm** (and `:44`
+  derefs `config.draft->target_layer_ids`) ⇒ with graphs ON, `--spec dspine` silently
+  captures **`run_dflash_draft`**. **A silent wrong body is the worst outcome here**;
+  the fix task (`mwqn42az-77db`) is told to make it **fail loudly / stay eager** rather
+  than capture the DFlash2 draft.
+  Also: **gate future runs in a detached worktree pinned to the sha**, not the main tree
+  — HEAD moved mid-run again (docs-only, harmless, but it is the same hazard that
+  poisoned a build dir).
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
