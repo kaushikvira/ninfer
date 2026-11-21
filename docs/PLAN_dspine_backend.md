@@ -43,8 +43,11 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 - done: plan; 4 reviews (self / verifier `mwpxt2ws` / D-14 drafter-swap /
   `mwpya6mp` coherence); spine verified (D-01 license, D-05 T=0.9, D-02 map,
   5090-fits, D-14 drafter-swap); fixes → **D-10..14**
-- next: **P0 gate = P0b parity bit-exact** (else STOP) → P1 dev (port to
-  portability + `--spec dspine` + converter + parity tests)
+- next: **P0 gate = P0b parity** (relaunch `mwpzha6z-2324`; DIVERGENT ⇒ STOP)
+  → P1 dev (exec path + converter)
+- P0a: **DONE/green** — `feat/dspine-port` `1138e8b2` (14 files, +746/−5),
+  full host build 743/743 `sm_120a`, 6 ops linked, `--spec dspine` [1,15]
+  validates; R5 drift = 5 rename families, survivable. **Not yet merged.**
 - fail-safe: P0c skipped ⇒ **no cheap early accept abort**; the first accept
   numbers now arrive at **P2 V3-native**. If R4 looks real, the K-sweep sweep
   on a5000-2 (P2) is the earliest abort point.
@@ -170,6 +173,21 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   first real accept numbers arrive only after P1/P2 exec-path work lands.
   P0 is therefore **parity-only** (P0b bit-exact is still the kill-switch for a
   broken fork).
+
+- **D-2026-11-21-18** — **P0b oracle = the COMPILED OP, not a CUDA transcription.**
+  P0b attempt 1 (`mwpykgtv-4116`, opus-5) spent its budget writing
+  `fork_model.py` = a line-cited **hand transcription** of `kernels.cu`, then
+  comparing it to a FP64 SGLang reference — i.e. **model-vs-model**, and it
+  ended **55 fail / 4 pass, uncommitted**. Its headline "structural `finish`
+  divergence (85 % of bf16 writes, `saturated`/`norm_eps_zero`)" is therefore
+  **inconclusive by construction**: the transcription is as much a suspect as
+  the kernel. Locked: **P0b links `libninfer_ops.so` from the P0a build
+  (`1138e8b2`, `build/p0a`) and calls the real kernels on GPU 1**, vs
+  `Tencent/sglang_dspine/kernels/reference.py`. Per-op verdicts are
+  **BIT-EXACT / EQUIVALENT-ORDER (named reduction-order diff, in-band) /
+  DIVERGENT** — only DIVERGENT is a kill-switch. Relaunched `mwpzha6z-2324`.
+  Rule added: **a red parity suite is never greened by widening a tolerance**;
+  and subagents **commit while red** (attempt 1 lost all its work).
 
 ## OBJECTIVE
 
