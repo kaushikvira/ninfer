@@ -809,6 +809,46 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   second shape table** (D-35's lesson a third time). Gateable later by a K/V-only
   instantiation; not a correctness issue.
 
+- **D-2026-11-21-40** — **D-39's RED 2 WAS PROBE WIRING, NOT THE ENGINE — and the
+  control arm is now a MEASURED number.** Merged `13e52748` (from `fc7b6f85`).
+  **Root cause of the T=0 divergence**: the two ops declare **transposed** shapes for
+  one logical table — `cand[16,drafts,batch]` (`dspine_bridge.h:107`) vs
+  `cand[batch,drafts,16]` (`:98`) — and the strides differ **twice over** (axes swap
+  **and** the candidate axis is `batch*drafts`=15 at prod vs the head's 16), so the
+  probe's "host transpose of 240 words" was an **identity copy** and the tail sampled
+  ids **out of other slots' candidate sets**. Measured on the walk's own round: tail
+  candidate stream **238/240 → 0/240**; drafts violating
+  `serial_tail_accept_q_error`'s contract **10–13/15 → 0/15**; **T=0 arm vs its own
+  round's greedy pair 15/15 apart → 15/15 IDENTICAL.** Rule table **4/4 agree**
+  (`propose.py:104-112`, `:114-152` at `inv_temp→∞`, `serial_chain_kernel:421-435`,
+  `serial_tail_kernel:546-556`: all walk `sender = argmax_k table[i,sender,k]`, publish
+  `cand[i,that]`, first max wins ties). **No op was wrong; none was touched.** Three
+  further probe defects it hid: unsequenced host copies (round N read N−1's
+  candidates — literally "chain a round behind the tail"), the identity compared the
+  last round's streams against the first round's drafts, and both `drafts` layouts are
+  transposed so the flat compare only meant anything at batch 1. With a module-load
+  pass first, **the alloc-free row is GREEN (21159 → 21159 MiB)**. Parity re-run
+  **unmoved**: P0b `idx` 240/240 ×3, `chain` 15/15 ×3, D-37 `D-compose:t00-greedy-pair`
+  15/15 bit-exact, tail K1+K2 green.
+  **`⚠` CRITERION ⑤ NOW HAS A REAL DENOMINATOR — measured off prod's own metrics**
+  (`/metrics`, Bearer, 214,153 rounds of live DFlash2 traffic, K=7):
+  **accepted tokens/round = 2.998** (642,048/214,153) ⇒ **≈4.0 tokens/round including
+  the verified target token**; per-position acceptance **p0 81.9 % → p1 62.7 → p2 47.7
+  → p3 36.9 → p4 29.0 → p5 23.1 → p6 18.6 %** (per-token conditional ≈ 0.77–0.82).
+  **So the bar is NOT "4.75 @ K=7"** — that was the K=15 figure the verifier already
+  flagged (see VERIFIER DETAIL). **DSpine must beat ~3.0 accepted/round**, i.e. ~4.0
+  tok/round, and it drafts **K=15 with a block-16-trained drafter** against DFlash2's
+  **K=7** (note: prod runs K=7, which *matches* the z-lab card's block_size 8 ⇒
+  DFlash2 is **not** K-starved today, so D-16's headroom argument rests on the
+  drafter's block-16 training + double the window, not on a K mismatch).
+  **Still open**: criterion 4 — the probe's **pass-to-pass determinism row is red**
+  (14/15 ids move between consecutive publishing passes) and it is **not** an
+  acceptance-path defect: `run_forward` re-seeds only `work.taps` while `dspine_finish`
+  **refines the residual stream in place**, so pass N+1 refines what pass N left behind
+  ⇒ "same inputs twice" is not what that row feeds it. Fix = a real **round reset**
+  (which the engine path needs anyway) before the determinism and multi-round rows mean
+  anything.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
