@@ -39,13 +39,18 @@ void require_head(const Weight& head, std::int32_t hidden, const char* message) 
                 message);
         return;
     }
-    // The group of a column is `column / 32`, so the logical columns must be whole groups; the
-    // padded row stride is what the code plane is addressed by.
-    require(head.qtype == QType::Q8_G32_FP16 && head.layout == QuantLayout::RowSplit &&
-                head.scale_dtype == DType::FP16 && head.group == 32 &&
-                head.group_size == static_cast<std::uint32_t>(32) && (head.k % 32) == 0 &&
-                head.padded_shape[1] % 32 == 0,
-            message);
+    // The Q8 arm is named field by field: a caller this gate refuses is holding a real weight, and
+    // "your head is not the tower's format" is not an actionable answer when six fields are in the
+    // conjunction. The group of a column is `column / 32`, so the logical columns must be whole
+    // groups; the padded row stride is what the code plane is addressed by.
+    require(head.qtype == QType::Q8_G32_FP16 && head.layout == QuantLayout::RowSplit,
+            "dspine serial_scores: a non-FP8 head must be Q8_G32_FP16 with layout RowSplit");
+    require(head.scale_dtype == DType::FP16,
+            "dspine serial_scores: Q8 head scale_dtype must be FP16");
+    require(head.group == 32 && head.group_size == static_cast<std::uint32_t>(32),
+            "dspine serial_scores: Q8 head group must be 32 (the G32 of the format)");
+    require((head.k % 32) == 0 && head.padded_shape[1] % 32 == 0,
+            "dspine serial_scores: Q8 head needs whole 32-column groups in k and padded_shape[1]");
 }
 
 } // namespace

@@ -57,12 +57,14 @@ GATHER_MUTANTS = {
 
 
 def run_fixture(op, geo, eps, inputs, tables, nvfp4_tables, fp8, policy, workdir,
-                q8=None, head="fp8", scores=False, pad=False) -> dict:
+                q8=None, head="fp8", scores=False, pad=False, q8gate="") -> dict:
     """One fixture invocation; returns the produced output files.
 
     `q8`/`head` select the head representation serial_scores is handed (the P0b FP8 row-scaled
-    head by default, the tower's Q8_G32_FP16 one for the head-format arm), and `scores` asks for
-    the FP32 [batch,16,16,drafts] score-table output.
+    head by default, the tower's Q8_G32_FP16 one for the head-format arm), `scores` asks for the
+    FP32 [batch,16,16,drafts] score-table output (2 = the same tensor declared BF16, which the op
+    must refuse), and `q8gate` warps one Q8 head metadata field so the head gate must refuse the
+    weight — both last ones are the gate teeth in run_head_score_table.py.
     """
     workdir.mkdir(parents=True, exist_ok=True)
     geometry = {"H": geo["hidden"], "R": geo["rank"], "C": geo["code_size"],
@@ -101,8 +103,10 @@ def run_fixture(op, geo, eps, inputs, tables, nvfp4_tables, fp8, policy, workdir
         command.append(f"--q8=head:{code_path}:{scale_path}")
         command.append(f"--head={head}")
         command.append(f"--pad={1 if pad else 0}")
+    if q8gate:
+        command.append(f"--q8gate={q8gate}")
     if scores:
-        command.append("--scores=1")
+        command.append(f"--scores={int(scores)}")
     for key, value in policy.items():
         command.append(f"--{key}={value}")
     result = subprocess.run(command, capture_output=True, text=True)

@@ -68,7 +68,10 @@ void dspine_finish(Tensor& residual, const Tensor& rms, const Tensor& delta, con
 // scores, when non-null, additionally receives the K x K score matrix of every (batch, row) as
 // FP32 [batch, 16 (candidate), 16 (sender), drafts] (first axis fastest) - the table
 // dspine_serial_tail consumes, and the un-collapsed form of the same score_s the argmax reads.
-// It is a caller-provided buffer; the Op allocates nothing.
+// It is a caller-provided buffer; the Op allocates nothing. Validated: FP32, contiguous, exactly
+// [batch, 16, 16, drafts], and it is written whole - every element of it, and no other buffer -
+// by this call, so it must not alias an input. Cost is K*K = 256 FP32 per (batch, row): 15 KiB
+// for a prod round (batch 1, 15 drafts), and nothing in the kernel grows with it.
 void dspine_serial_scores(const Tensor& cand, const Tensor& raw, const Tensor& rms,
                           const Tensor& packed_q, const Tensor& anchors, const Tensor& norm_w,
                           const Tensor& gate_bias, const Weight& head, const Weight& tg,

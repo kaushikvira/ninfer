@@ -6,11 +6,15 @@
 //   * --nvtbl=NAME:CODES:SCALES:DIVISOR  (a block-scaled NVFP4 gather table),
 //   * --op=serial_tail                   (the sampled tail op, with the request policy),
 //   * --q8=NAME:CODES:SCALES             (a Q8_G32_FP16 group-row-split head),
-//   * --head=fp8|q8                      (which head serial_scores must be given), and
-//   * --scores=0|1                       (emit the FP32 [batch,16,16,drafts] score table that
-//                                        serial_scores computes and serial_tail consumes).
+//   * --head=fp8|q8                      (which head serial_scores must be given),
+//   * --scores=0|1|2                     (emit the FP32 [batch,16,16,drafts] score table that
+//                                        serial_scores computes and serial_tail consumes; 2
+//                                        declares it BF16, which the op must refuse),
 //   * --pad=0|1                          (pad a Q8 head's code rows to 128 columns, the way
-//                                        core/weight_view.cpp materializes a RowSplit weight).
+//                                        core/weight_view.cpp materializes a RowSplit weight),
+//   * --q8gate=none|group16|scalebf16|padodd
+//                                        (warp one metadata field of the Q8 head so the op's
+//                                        head gate has to refuse the weight).
 // The P0b fixture is left untouched: the BF16 tables are still what P0b verified, and the
 // whole point here is to drive the SAME ops through their NVFP4 gather branch.
 //
@@ -152,7 +156,11 @@ struct Args {
     std::vector<std::tuple<std::string, std::string, std::string>> fp8s;
     std::vector<std::tuple<std::string, std::string, std::string>> q8s;
     std::string head  = "fp8";
-    bool        scores = false;
+    // 0 = no score table, 1 = the FP32 one the tail consumes, 2 = the same tensor declared BF16
+    // (the shape/dtype gate's teeth: the op must refuse it, not coerce it).
+    std::int32_t scores = 0;
+    // A warped Q8 head metadata field for the head gate's teeth (see q8_row_split).
+    std::string q8gate;
     bool        pad    = false;
 
     // serial_tail request policy (K1 = T 1.0 / top_k 20 / top_p 1.0 / min_p 0).
@@ -355,6 +363,11 @@ struct Builder {
     // code plane is one signed byte per element at the PADDED row stride (align_up(k, 128)) and
     // the scale plane one FP16 per (row, 32-column group). --q8 takes the planes at the padded
     // geometry the driver wrote, so a padded head exercises the stride the op must honour.
+    //
+    // --q8gate=defect warps one METADATA field of that weight (never the planes) so the op's head
+    // gate has to refuse it: the acceptance of the tower's format is only a decision if the gate
+    // that makes it bites. `group16` claims a group of 16, `scalebf16` a BF16 scale plane, `padodd`
+    // a padded column count that is not a whole number of groups.
     Weight q8_row_split(const std::string& key, std::int32_t n, std::int32_t k) {
         for (const auto& [name, codes, scales] : args.q8s) {
             if (name != key) { continue; }
@@ -382,6 +395,15 @@ struct Builder {
             weight.scale_nb[2] = weight.scale_nb[3] = static_cast<std::int64_t>(groups) * n * 2;
             weight.group_size = 32;
             weight.group = 32;
+            if (args.q8gate == "group16") {
+                weight.group = 16;
+            } else if (args.q8gate == "scalebf16") {
+                weight.scale_dtype = DType::BF16;
+            } else if (args.q8gate == "padodd") {
+                weight.padded_shape[1] = k + 16;
+            } else if (!args.q8gate.empty() && args.q8gate != "none") {
+                die("unknown --q8gate '" + args.q8gate + "'");
+            }
             return weight;
         }
         die("missing --q8 " + key);
@@ -443,7 +465,9 @@ Args parse(int argc, char** argv) {
         } else if (argument.rfind("--head=", 0) == 0) {
             args.head = value("--head=");
         } else if (argument.rfind("--scores=", 0) == 0) {
-            args.scores = value("--scores=") == "1";
+            args.scores = static_cast<std::int32_t>(std::stoi(value("--scores=")));
+        } else if (argument.rfind("--q8gate=", 0) == 0) {
+            args.q8gate = value("--q8gate=");
         } else if (argument.rfind("--pad=", 0) == 0) {
             args.pad = value("--pad=") == "1";
         } else if (argument.rfind("--nvtbl=", 0) == 0) {
@@ -546,7 +570,8 @@ int main(int argc, char** argv) {
         }
         // 5) serial_scores: -> idx [16, D, B], and with --scores=1 the FP32 score table
         //    [B, 16 (candidate), 16 (sender), D] that serial_tail consumes (--head=fp8|q8 picks
-        //    which head representation the op is handed).
+        //    which head representation the op is handed, --q8gate warps its metadata, --scores=2
+        //    asks for that table as BF16).
         else if (args.op == "serial_scores") {
             Ten cand = builder.make("cand", DType::I32, {16, i32(D), i32(B)});
             Ten raw = builder.make("raw", DType::BF16, {i32(H), i32(W), i32(B)});
@@ -561,8 +586,10 @@ int main(int argc, char** argv) {
             auto idx = builder.out_tensor("idx", DType::I32, {16, i32(D), i32(B)});
             Tensor scores;
             Tensor* scores_ptr = nullptr;
-            if (args.scores) {
-                scores = builder.out_tensor("scores", DType::FP32, {i32(B), 16, 16, i32(D)});
+            if (args.scores != 0) {
+                scores = builder.out_tensor("scores",
+                                            args.scores == 2 ? DType::BF16 : DType::FP32,
+                                            {i32(B), 16, 16, i32(D)});
                 scores_ptr = &scores;
             }
             dspine_serial_scores(builder.tensor(cand), builder.tensor(raw), builder.tensor(rms),

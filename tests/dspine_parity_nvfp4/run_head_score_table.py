@@ -70,6 +70,16 @@ SCORE_NORM_BAND = 1.0e-3
 SCORE_POINT_CEILING = 2.0e-2   # relative pointwise, the gross ceiling
 
 PROD_POLICY = dict(temp=0.9, topk=20, topp=1.0, minp=0.05)
+
+# (Z) the gate arms: kwargs for run_fixture, and the words the op's message has to contain. The
+# needles are the gate's own field names, from ops/dspine_bridge/dspine_bridge.cpp::require_head
+# and the scores checks in dspine_serial_scores.
+GATE_TEETH = (
+    ("Z-gate:q8_group16", dict(q8gate="group16", scores=1), "group must be 32"),
+    ("Z-gate:q8_scale_bf16", dict(q8gate="scalebf16", scores=1), "scale_dtype must be fp16"),
+    ("Z-gate:q8_pad_not_groups", dict(q8gate="padodd", scores=1), "padded_shape[1]"),
+    ("Z-gate:scores_bf16_table", dict(scores=2), "scores must be fp32"),
+)
 GREEDY_POLICY = dict(temp=0.0, topk=20, topp=1.0, minp=0.0)
 
 
@@ -140,8 +150,19 @@ def head_inputs(built: dict, geo: dict, pad: bool) -> tuple:
 
 
 def score_table_row(rows: list, kind: str, case: Case, want: np.ndarray, got_path: Path) -> dict:
-    """The table's normwise verdict: relative Frobenius plus a gross pointwise ceiling."""
+    """The table's normwise verdict: relative Frobenius plus a gross pointwise ceiling. The
+    criterion's non-finite rule is that a non-finite in the EMITTED table is a failure in itself,
+    not a distance - the host cannot see one at call time (no sync in the op), so this is where
+    the contract's `scores must be finite` is checked."""
     got = table_from(got_path, want.shape)
+    if not bool(np.isfinite(got).all()):
+        bad = int(np.count_nonzero(~np.isfinite(got)))
+        rows.append({"kind": kind, "op": "serial_scores", "case": case.name, "output": "scores",
+                     "n": int(got.size), "band": 0, "exact": 0, "mismatches": bad,
+                     "max_abs_ulp": -1, "verdict": "NON-FINITE"})
+        print(f"  [{case.name} {kind}] NON-FINITE: {bad}/{got.size} of the emitted table", 
+              file=sys.stderr)
+        return rows[-1]
     delta = got.astype(np.float64) - want.astype(np.float64)
     fro = float(np.linalg.norm(delta) / max(np.linalg.norm(want.astype(np.float64)), 1e-300))
     scale = np.maximum(np.abs(want.astype(np.float64)), np.float64(1e-6))
@@ -238,6 +259,30 @@ def run_head_case(case: Case, geo: dict, workdir: Path, pad: bool, rms_scale: fl
                                 np.zeros_like(tables["tg"]), tables["tsv"], geo["hidden"],
                                 geo["rank"], geo["width"])
     score_table_row(rows, "C-teeth:tg_term_dropped", case, base_only, device["scores"])
+
+    # (Z) the gates' teeth. Each arm hands the op a head or an out-param the contract refuses, and
+    # the op must refuse it naming the field: an acceptance of the tower's format is only a
+    # decision if the gate that makes it fires on the near-misses. The planes are untouched, only
+    # the metadata of the weight is warped, so a gate that stayed quiet means the arm RAN.
+    for kind, kwargs, needle in GATE_TEETH:
+        try:
+            # The ':' of the kind name must not reach a path: the fixture splits `--in=NAME:PATH`
+            # on the first colon, so a colon in the workdir would truncate every input after it.
+            run_fixture(op, geo, case.eps, inputs, tables, {}, {}, {},
+                        workdir / kind.replace(":", "-"),
+                        q8=(head.codes, head.scales), head="q8", pad=pad, **kwargs)
+            verdict, detail = "GATE-ACCEPTED", "the op took the defect and ran"
+        except RuntimeError as error:
+            text = " ".join(str(error).split())
+            verdict = ("GATE-REJECTED" if needle.lower() in text.lower()
+                       else "GATE-REJECTED-OTHER")
+            detail = text[-150:]
+        rows.append({"kind": kind, "op": op, "case": case.name, "output": "gate", "n": 1,
+                     "band": 0, "exact": int(verdict == "GATE-REJECTED"),
+                     "mismatches": int(verdict != "GATE-REJECTED"),
+                     "max_abs_ulp": 0 if verdict == "GATE-REJECTED" else -1,
+                     "verdict": verdict, "worst": detail})
+        print(f"  [{case.name} {kind}] {verdict} :: {detail}", file=sys.stderr)
 
     # (D) compose on the device: table -> serial_tail, and the greedy pair for the T=0 arm.
     compose(rows, case, geo, inputs, device, workdir)
@@ -336,6 +381,11 @@ def main() -> int:
     bad = [row for row in clean if row["verdict"] not in ("BIT-EXACT", "EQUIVALENT-ORDER",
                                                           "GREEN")]
     teeth = [row for row in rows if row["kind"].startswith("C-teeth")]
+    # The gate arms have one right answer, GATE-REJECTED: the op refused the warped head / the
+    # BF16 table, naming the field. Anything else - it ran, or it refused for a reason that is not
+    # the gate - is a finding.
+    gates = [row for row in rows if row["kind"].startswith("Z-gate")]
+    gate_blind = [row for row in gates if row["verdict"] != "GATE-REJECTED"]
     # Which arm sees which tooth is a property of the vectors (D-27): at the natural scale the
     # 5120-wide head-term dot and the R-wide table-term dot compete, so an argmax or a score table
     # may rank identically under a defect in the term that is not ranking it. The `headdom` arm
@@ -357,14 +407,21 @@ def main() -> int:
               + (f", strength {','.join(scale[:3])}" if scale else ""))
         if not bit:
             weak.append({"kind": kind, "verdict": "NO-TEETH"})
+    for row in gates:
+        if row["verdict"] == "GATE-REJECTED":
+            print(f"  gate  {row['kind']:<32} {row['case']:<18} refused, naming the field")
     print(f"\nclean rows {len(clean)} (unexpected verdicts {len(bad)}) | "
-          f"teeth {len(arms)} kinds ({len(weak)} never bite)")
+          f"teeth {len(arms)} kinds ({len(weak)} never bite) | "
+          f"gate arms {len(gates)} ({len(gate_blind)} not refused by the gate)")
     for row in bad:
         print(f"  unexpected: {row['kind']} {row['op']} {row['output']} {row['verdict']} "
               f"max={row.get('max_abs_ulp')}")
     for row in weak:
         print(f"  tooth never bites: {row['kind']}")
-    return 0 if not bad and not weak else 1
+    for row in gate_blind:
+        print(f"  gate did not name the defect: {row['kind']} {row['case']} "
+              f"{row['verdict']} [{row.get('worst')}]")
+    return 0 if not bad and not weak and not gate_blind else 1
 
 
 if __name__ == "__main__":
