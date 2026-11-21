@@ -123,29 +123,50 @@ struct DspineFixture {
 
         file.root["components"]["dspine"] = {
             {"config",
-             {{"architectures", {"DSpineDraftModel"}},
-              {"model_type", "qwen3"},
-              {"hidden_size", h},
-              {"intermediate_size", inter},
-              {"num_attention_heads", heads},
-              {"num_key_value_heads", kv_heads},
-              {"head_dim", head_dim},
-              {"num_hidden_layers", layers},
-              {"max_position_embeddings", 128},
-              {"rms_norm_eps", 1e-6},
-              {"rope_parameters", {{"rope_theta", 10000}}},
-              {"layer_types", {"sliding_attention", "sliding_attention"}},
-              {"sliding_window", 64},
-              {"vocab_size", vocab},
-              {"num_target_layers", 1},
-              {"block_size", 4},
-              {"dflash_config",
-               {{"target_layer_ids", {0}},
-                {"mask_token_id", 256},
-                {"selected_prefix_code_bridge",
-                 {{"code_size", code_size}, {"rank", rank}, {"eps", 1e-6}}},
-                {"selected_prefix_feature_layers", {0}},
-                {"selected_prefix_last_write_refine", {{"head_topk", 4}}}}}}},
+                 {
+                    {"architectures", {"DSpineDraftModel"}},
+                    {"model_type", "qwen3"},
+                    {"hidden_size", h},
+                    {"intermediate_size", inter},
+                    {"num_attention_heads", heads},
+                    {"num_key_value_heads", kv_heads},
+                    {"head_dim", head_dim},
+                    {"num_hidden_layers", layers},
+                    {"max_position_embeddings", 128},
+                    {"rms_norm_eps", 1e-6},
+                    {"rope_parameters", { {"rope_theta", 10000}, {"rope_type", "default"} }},
+                    {"layer_types", {"sliding_attention", "sliding_attention"}},
+                    {"sliding_window", 64},
+                    {"is_causal", true},
+                    {"vocab_size", vocab},
+                    {"num_target_layers", 1},
+                    {"block_size", 4},
+        // The member set is the converter's (tools/convert/qwen3_8_27b/dspine_recipe.py:
+        // _ROOT_CONFIG + _SECOND_PASS_CONFIG + _DRAFT_CONFIG + _LAST_WRITE_REFINE) at this
+        // geometry, so the allowlist's positive case carries every member the recipe emits.
+        // first_exact counts the draft layers that run once (num_hidden_layers - 1) and head_topk
+        // is the width the serial tail scores (kSerialTailSlots); the feature layer ids are
+        // 1-based, exactly as the reference emits them.
+                    {"code_bridge_second_pass", { {"first_exact", 1}, {"head_topk", 16}, {"mode", "serial_table"} }},
+                    {"dflash_config",
+                         {
+                            {"draft_block_causal", true},
+                            {"mask_token_id", 256},
+                            {"selected_prefix_code_bridge",
+                                { {"code_size", code_size}, {"rank", rank}, {"eps", 1e-6} } },
+                            {"selected_prefix_decode_mode", "serial"},
+                            {"selected_prefix_feature_layers", {1, 2}},
+                            {"selected_prefix_feature_write_mode", "independent"},
+                            {"selected_prefix_feature_writes", true},
+                            {"selected_prefix_last_write_refine",
+                                { {"head_topk", 16},
+                                    {"kind", "exact_sender"},
+                                    {"version", 1},
+                                    {"weight", 1.0} } },
+                            {"selected_prefix_terminal", false},
+                            {"target_layer_ids", {0}}}},
+                    },
+                },
             {"target", "text"}};
 
         // The output head is shared with the text backbone; the DSpine draft uses it with a
@@ -550,6 +571,134 @@ void dflash2_path_unchanged() {
     require(plan->dspine_bytes() == 0, "DFlash2 load should report zero DSpine bytes");
 }
 
+// Applies a mutation to the fixture's dspine config and requires the parser to refuse it with a
+// diagnostic containing `needle`.
+template <class Mutation>
+void rejects_config(Mutation&& mutation, std::string_view needle, const char* message) {
+    DspineFixture fixture;
+    fixture.add_dspine_component();
+    mutation(fixture.file.root["components"]["dspine"]["config"]);
+    rejects_with(
+        [&] {
+            fixture.file.write();
+            const artifact::Reader reader(fixture.file.entry);
+            (void)q35::read_definition(reader, {.speculative = SpeculativeBackend::Dspine});
+        },
+        needle, message);
+}
+
+// The positive half of the allowlist: every member the V3 recipe emits (the converter's
+// _ROOT_CONFIG + _SECOND_PASS_CONFIG + _DRAFT_CONFIG + _LAST_WRITE_REFINE, which is what both
+// shipped artifacts carry) parses, and the schedule the serial tail is built from reaches the
+// config struct. This is the regression the real artifacts exposed: the parser's vocabulary was
+// narrower than the recipe's, so neither artifact loaded.
+void dspine_recipe_vocabulary_accepted() {
+    DspineFixture fixture;
+    fixture.add_dspine_component();
+    fixture.file.write();
+    const artifact::Reader reader(fixture.file.entry);
+    const auto plan = q35::read_definition(reader, {.speculative = SpeculativeBackend::Dspine});
+    require(plan->config().dspine.has_value(), "DSpine config was not parsed");
+    const auto& config = *plan->config().dspine;
+    require(config.second_pass_first_exact == 1, "second-pass first_exact was not parsed");
+    require(config.second_pass_head_topk == 16, "second-pass head_topk was not parsed");
+    require(config.second_pass_mode == "serial_table", "second-pass mode was not parsed");
+    require(config.decode_mode == "serial", "bridge decode mode was not parsed");
+    require(config.head_topk == 16, "refinement head_topk was not parsed");
+    require(config.feature_layers == (std::vector<std::uint32_t>{0, 1}),
+            "the 1-based feature layers were not converted to the draft's numbering");
+    require(config.bridge.kappa == 0, "an absent bridge kappa was invented");
+    std::cout << "dspine recipe vocabulary accepted: second pass first_exact="
+              << config.second_pass_first_exact << " head_topk=" << config.second_pass_head_topk
+              << " mode=" << config.second_pass_mode << " decode=" << config.decode_mode << "\n";
+}
+
+// The allowlist is the recipe's member set, not a permissive parse: an unknown member is refused
+// at every level it can appear at.
+void dspine_rejects_unknown_members() {
+    rejects_config([](Json& config) { config["selected_prefix_terminal"] = false; },
+                   "dspine config: unknown member selected_prefix_terminal",
+                   "a dflash_config member hoisted to the config root was accepted");
+    rejects_config([](Json& config) { config["rope_parameters"]["rope_scale"] = 1.0; },
+                   "dspine RoPE: unknown member rope_scale",
+                   "an unrecognised RoPE member was accepted");
+    rejects_config([](Json& config) { config["code_bridge_second_pass"]["tau"] = 0.5; },
+                   "DSpine code-bridge second pass: unknown member tau",
+                   "an unrecognised second-pass member was accepted");
+    rejects_config([](Json& config) { config["dflash_config"]["is_causal"] = true; },
+                   "DSpine dflash_config: unknown member is_causal",
+                   "a config-root member dropped into dflash_config was accepted");
+    rejects_config(
+        [](Json& config) {
+            config["dflash_config"]["selected_prefix_last_write_refine"]["schedule"] = "linear";
+        },
+        "DSpine last-write refine: unknown member schedule",
+        "an unrecognised last-write refine member was accepted");
+}
+
+// A member the allowlist admits is not accepted at any value: the pins are the shapes of the
+// path this engine binds, so an unimplemented one is a rejection naming the supported set.
+void dspine_rejects_unimplemented_values() {
+    rejects_config(
+        [](Json& config) { config["code_bridge_second_pass"]["mode"] = "parallel_table"; },
+        "mode is \"parallel_table\", which this engine does not implement (supported: "
+        "serial_table)",
+        "a second-pass mode with no tail implementation was accepted");
+    rejects_config(
+        [](Json& config) { config["dflash_config"]["selected_prefix_decode_mode"] = "parallel"; },
+        "selected_prefix_decode_mode is \"parallel\"",
+        "a bridge decode mode with no implementation was accepted");
+    rejects_config(
+        [](Json& config) { config["dflash_config"]["selected_prefix_terminal"] = true; },
+        "selected_prefix_terminal must be false",
+        "a terminal-code artifact was accepted");
+    rejects_config([](Json& config) { config["is_causal"] = false; },
+                   "is_causal must be true", "a non-causal draft was accepted");
+    rejects_config([](Json& config) { config["code_bridge_second_pass"]["first_exact"] = 2; },
+                   "serial_table redoes the last layer only",
+                   "a second pass that redoes more than the last layer was accepted");
+    rejects_config([](Json& config) { config["code_bridge_second_pass"]["first_exact"] = 0; },
+                   "serial_table redoes the last layer only",
+                   "a second pass that redoes no layer was accepted");
+    rejects_config(
+        [](Json& config) {
+            config["code_bridge_second_pass"]["head_topk"]                 = 8;
+            config["dflash_config"]["selected_prefix_last_write_refine"]["head_topk"] = 8;
+        },
+        "the serial tail scores 16 candidates per slot",
+        "a refinement width with no tail kernel was accepted");
+    rejects_config(
+        [](Json& config) {
+            config["dflash_config"]["selected_prefix_last_write_refine"]["head_topk"] = 8;
+        },
+        "the bridge's refinement widths disagree",
+        "a refine width that contradicts the second pass was accepted");
+    rejects_config(
+        [](Json& config) {
+            config["dflash_config"]["selected_prefix_last_write_refine"]["version"] = 2;
+        },
+        "version must be 1", "an unknown last-write refine version was accepted");
+    rejects_config(
+        [](Json& config) {
+            config["dflash_config"]["selected_prefix_feature_layers"] = Json::array({1});
+        },
+        "a bridge write on every draft layer",
+        "a draft that writes features on only some layers was accepted");
+    rejects_config(
+        [](Json& config) {
+            config["dflash_config"]["selected_prefix_feature_layers"] = Json::array({0, 1});
+        },
+        "feature layer index must be positive",
+        "a zero-based feature layer list was accepted");
+    rejects_config([](Json& config) { config["rope_parameters"]["rope_type"] = "yarn"; },
+                   "rope_type is \"yarn\"", "a RoPE type with no draft path was accepted");
+    rejects_config(
+        [](Json& config) {
+            config["dflash_config"]["selected_prefix_last_write_refine"]["kind"] = "topk_union";
+        },
+        "kind is \"topk_union\"", "a refine kind with no bridge path was accepted");
+}
+
 } // namespace
 
 int main() {
@@ -565,6 +714,9 @@ int main() {
         bridge_rejects_unsupported_declaration();
         bridge_rejects_mixed_tg_tsv();
         bridge_binder_check_unchanged();
+        dspine_recipe_vocabulary_accepted();
+        dspine_rejects_unknown_members();
+        dspine_rejects_unimplemented_values();
         std::cout << "DSpine load-side checks passed\n";
         return 0;
     } catch (const std::exception& error) {
