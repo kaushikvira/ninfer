@@ -372,6 +372,38 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **not** the NVFP4 gather tables (still unmeasured, D-20 → in flight
   `mwq2d6vr-b9c4` on the same open window).
 
+- **D-2026-11-21-26** — **OVERNIGHT AUTONOMY GRANTED (user, 2026-11-22, going to
+  sleep).** The user is absent and has **delegated the P2→P3→P4 gates to the main
+  agent**, including the **full P3 prod window**. This supersedes the plan's
+  "never self-approve a promotion" rule **for this night only**. Answers given:
+  **prod window ALLOWED**; **dgemma bounced per task** (down only while device
+  work runs, restored when idle); **on red: retry once with a different approach,
+  then stop that line, document, move on**. Watchdog: scheduled read-only agent
+  `dspine-watchdog` (`b6e8120b`) at :17/:47 UTC reports phase/gates/tree/lanes so
+  a stuck main agent is reminded of the goal.
+  **Self-imposed rules for the night (non-negotiable, these are the fence):**
+  1. **P3 is entered ONLY when all of these are green**: sampled-tail K1+K2
+     (done, D-25) · NVFP4 gather/dequant parity (D-20) · draft forward producing
+     proposals from the real 1.3157 GiB artifact · whole-round decode wired and
+     **T=0 byte-exact vs reference** · a **DSpine end-to-end number on GPU 1
+     (a5000-2 class) at T=0.9 that at least matches DFlash2 K7**, with N>=3
+     repeats (D-24). Missing any one ⇒ **no P3**, P2 shelved and documented.
+  2. **Prod never goes dark.** Before P3: snapshot the 5090-1 cfg + image tag,
+     record the rollback command, `systemctl disable --now ninfer-5090-1` +
+     stop `ninfer-watchdog`, and bring **a5000-2 up on the prod parity build
+     `416-ebdc67e5` (D-09, KV-capped ~30 GiB, D-12)** with the model-id flip
+     `a5000-2-qwen27` so pi keeps serving. **If prod is not serving within
+     20 minutes of the window opening, abort P3 and restore 5090-1.**
+  3. **basalt is never down** (never-down policy); **one lane action at a time**;
+     RAM guard on every `lane up`.
+  4. **Abort P4 / roll prod back on any of**: gate fail · wall-clock > 3 h in the
+     window · a wedge (health != 200 after restart) · any acceptance result below
+     DFlash2 K7. **Restoring DFlash2 prod beats promoting a maybe.**
+  5. Commit + push at **every** gate (the box dying must not lose the night), and
+     write the ledger entry **before** starting the next unit, not after.
+  6. No tolerance widening, no test deletion, no silent fallbacks — a red result
+     is a documented finding, never a green.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
