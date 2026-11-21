@@ -19,6 +19,16 @@ ninfer_add_test(ninfer_qwen3_5_dspine_real_test
 set_tests_properties(ninfer_qwen3_5_dspine_real_test PROPERTIES
   SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine")
 
+# The DSpine draft forward's linear gate, read out of the compiled shape tables at the geometries
+# the real drafter declares (the shape half of the forward probe, wt-dspine-fwd @ 59830140). A
+# host-side lookup, so it allocates nothing; it is labelled "gpu" only because it names the card it
+# ran on, and it needs NINFER_TEST_ARTIFACT + NINFER_TEST_DEVICE (D-29: no device is guessed).
+ninfer_add_test(ninfer_qwen3_5_dspine_shapes_real_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_shapes_real.cpp"
+  LIBRARIES ninfer_model_loading ninfer_ops)
+set_tests_properties(ninfer_qwen3_5_dspine_shapes_real_test PROPERTIES
+  SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 600)
+
 ninfer_add_test(ninfer_qwen3_5_runtime_mechanisms_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_runtime_mechanisms.cpp"
   LIBRARIES ninfer_engine ninfer_core)
