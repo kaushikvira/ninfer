@@ -54,6 +54,31 @@
 // NINFER_BENCH_ROUND_MS prod's measured ms/round (default 19.137 = the batch-1
 //                       ninfer_decode_step_seconds_sum/count read off prod's /metrics)
 //
+// THE CURVE, measured here at 32 timed iterations on GPU 1 (RTX PRO 5000 72 GB, pci c1:00), on the
+// real head (248320 x 5120) / tg (248320 x 512) / tsv (248320 x 1024) of the V3 nvfp4tables artifact,
+// with the round publishing 15 of 15 drafts and the head naming 240 of 240 candidate rows:
+//
+//   ms/round (mean, N=32)        K=1     K=3     K=7    K=15
+//     whole round              1.323   1.356   1.412   1.607   (p50 1.322/1.356/1.410/1.610)
+//     linear_topk              1.156   1.163   1.184   1.327   the K-wide projections of the head
+//     dspine_serial_scores     0.136   0.150   0.159   0.165   the score table (one launch)
+//     dspine_serial_tail       0.022   0.034   0.057   0.104   the policy filter and the draw
+//     the layout bridge        0.009   0.010   0.010   0.010   execution/dspine.cpp step 4
+//
+// SCALING  the measured exponent of the round's cost against K is 0.065, and cost(K=15)/
+// cost(K=7) = 1.14: D-43's K^2 reading of the score table predicted 4.59 for that ratio. The grid
+// in the op is kTopK x kTopK = 16 x 16 - its CANDIDATE axes, fixed by the artifact's head_topk=16 -
+// and the draft count is the kernel's CTA count, so the term is linear in K, and at 15 CTAs of
+// 86 KB of shared memory (one wave on one card) it is latency-bound: 0.136 -> 0.165 ms.
+// BREAK-EVEN at prod's own scale (a read-only GET of its /metrics: 271,048 rounds, 803,523 accepted
+// = 2.965 accepted/round, ninfer_decode_step_seconds{batch="1"} = 19.137 ms/round): if the WHOLE
+// 1.607 ms of the K=15 tail landed on top of a prod round, accepted/round must be >= 3.25 (+0.25,
+// +8.4 %) to keep tokens per second; the K=15-vs-K=7 window delta (0.195 ms) costs +0.03 (+1.0 %).
+// Against prod's own per-position decay (accepted 221483/169006/127956/98319/76991/61026/48742 of
+// 271,048 attempts, a conditional ~0.76-0.79 per position) a 15-wide window of the same drafter
+// quality is worth ~3.8-4.3 accepted/round. VERDICT: affordable, with the window term ~30x cheaper
+// than the K^2 reading and the whole tail ~6x the price of the window term.
+//
 // Run it pinned to the free card: CUDA_VISIBLE_DEVICES=1 NINFER_TEST_DEVICE=0 ...
 
 #include "artifact/binder.h"
