@@ -1,7 +1,19 @@
 #include "models/common/dspine/weights.h"
 #include "models/common/bindings.h"
 
+#include "artifact/formats.h"
+
+#include <array>
+
 namespace ninfer::models::dspine {
+namespace {
+
+// A vocabulary-indexed bridge table is BF16 in the reference artifact and NVFP4 block-scaled in
+// the sized one. ops::dspine_normalize_codes and ops::dspine_serial_scores validate the
+// representation they receive, so the binding follows the artifact's declaration within this set.
+constexpr std::array kBridgeTableFormats{QType::BF16, QType::NVFP4};
+
+} // namespace
 
 Weights bind_weights(Bindings& b, const Config& config, TargetGeometry target,
                      const std::string& component) {
@@ -43,7 +55,10 @@ Weights bind_weights(Bindings& b, const Config& config, TargetGeometry target,
     const auto c = config.bridge.code_size;
     const auto r = config.bridge.rank;
     const auto v = target.vocabulary;
-    out.bridge.codebook = b.direct(component + "/bridge/codebook", {v, c});
+    const auto codebook_name = component + "/bridge/codebook";
+    const auto tg_name       = component + "/bridge/tg";
+    const auto tsv_name      = component + "/bridge/tsv";
+    out.bridge.codebook = b.direct_as_declared(codebook_name, {v, c}, kBridgeTableFormats);
     out.bridge.early_read_weights = b.direct(component + "/bridge/early_read_weights",
                                              {config.num_hidden_layers - 1, c, h});
     out.bridge.read_weight = b.direct(component + "/bridge/read_weight", {c, h});
@@ -53,8 +68,18 @@ Weights bind_weights(Bindings& b, const Config& config, TargetGeometry target,
     out.bridge.gate_bias        = b.direct(component + "/bridge/gate_bias", {r});
     out.bridge.predecessor_gate = b.direct(component + "/bridge/predecessor_gate", {r, c});
     out.bridge.prev             = b.direct(component + "/bridge/prev", {r, c});
-    out.bridge.tg               = b.direct(component + "/bridge/tg", {v, r});
-    out.bridge.tsv              = b.direct(component + "/bridge/tsv", {v, 2 * r});
+    out.bridge.tg  = b.direct_as_declared(tg_name, {v, r}, kBridgeTableFormats);
+    out.bridge.tsv = b.direct_as_declared(tsv_name, {v, 2 * r}, kBridgeTableFormats);
+    // ops::dspine_serial_scores indexes tg and tsv as one representation (tg.qtype ==
+    // tsv.qtype); a mixed pair is an artifact defect, so it fails while binding.
+    const auto tg_format  = b.binder.declared_format(tg_name);
+    const auto tsv_format = b.binder.declared_format(tsv_name);
+    if (tg_format != tsv_format) {
+        throw artifact::ArtifactError(tsv_name + " and " + tg_name +
+                                      " must share one storage format (tg=" +
+                                      std::string(artifact::format_name(tg_format)) + ", tsv=" +
+                                      std::string(artifact::format_name(tsv_format)) + ")");
+    }
     return out;
 }
 

@@ -1,12 +1,27 @@
 #include "models/common/bindings.h"
 
+#include "artifact/formats.h"
 #include "artifact/views.h"
 
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <string>
 
 namespace ninfer::models {
+namespace {
+
+std::string supported_representations(std::span<const QType> formats) {
+    std::string out;
+    for (const auto format : formats) {
+        if (!out.empty()) { out += " or "; }
+        const auto name = artifact::format_name(format);
+        out += name.empty() ? std::string("an unsupported format") : std::string(name);
+    }
+    return out;
+}
+
+} // namespace
 
 void require_shared_binding(const artifact::ParameterReference& parameter,
                             const artifact::ParameterReference& source) {
@@ -106,6 +121,20 @@ WeightId Bindings::direct(std::string name, artifact::Shape shape, std::optional
         }
     }
     return parameter(std::move(name), std::move(shape), {}, format);
+}
+
+WeightId Bindings::direct_as_declared(std::string name, artifact::Shape shape,
+                                      std::span<const QType> accepted) {
+    if (accepted.empty()) {
+        throw artifact::ArtifactError(name + ": no representation is accepted for it here");
+    }
+    const auto declared = binder.declared_format(name);
+    if (std::find(accepted.begin(), accepted.end(), declared) == accepted.end()) {
+        throw artifact::ArtifactError(name + ": requires " + supported_representations(accepted) +
+                                      " storage, artifact declares " +
+                                      std::string(artifact::format_name(declared)));
+    }
+    return parameter(std::move(name), std::move(shape), {}, declared);
 }
 
 std::vector<BoundWeight> resolve_weights(std::vector<PendingWeight>&& pending,
