@@ -95,7 +95,10 @@ ninfer_add_test(ninfer_expert_cache_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/../test_expert_cache.cu"
           "${CMAKE_CURRENT_LIST_DIR}/../expert_cache_cuda_errors.cpp"
   LIBRARIES ninfer_core)
-set_tests_properties(ninfer_expert_cache_test PROPERTIES TIMEOUT 60)
+# A .cu test: it fails hard (`cudaGetDeviceCount failed: cudaErrorNoDevice`) with no
+# device and has no CPU-only path, so it carries the `gpu` label - that is what keeps
+# `ctest -LE gpu` honest on a CPU-only box instead of reporting a phantom red.
+set_tests_properties(ninfer_expert_cache_test PROPERTIES TIMEOUT 60 LABELS "gpu")
 
 ninfer_test_interpose(ninfer_expert_cache_test
   cudaEventRecord cudaMemcpyAsync cudaMemcpyBatchAsync cudaStreamSynchronize cudaStreamWaitEvent
