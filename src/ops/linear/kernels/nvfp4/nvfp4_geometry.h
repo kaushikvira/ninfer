@@ -37,10 +37,12 @@ using Nvfp4N5120K17408 = Nvfp4Geometry<5120, 17408>;
 using Nvfp4N5120K25600 = Nvfp4Geometry<5120, 25600>;
 using Nvfp4N6144K5120  = Nvfp4Geometry<6144, 5120>;
 
+using Nvfp4Activation4096Geometry  = Nvfp4ActivationGeometry<4096>;
 using Nvfp4Activation5120Geometry  = Nvfp4ActivationGeometry<5120>;
 using Nvfp4Activation6144Geometry  = Nvfp4ActivationGeometry<6144>;
 using Nvfp4Activation14336Geometry = Nvfp4ActivationGeometry<14336>;
 using Nvfp4Activation17408Geometry = Nvfp4ActivationGeometry<17408>;
+using Nvfp4Activation25600Geometry = Nvfp4ActivationGeometry<25600>;
 
 enum class Nvfp4GeometryId : std::uint8_t {
     N14336K5120,
@@ -51,7 +53,6 @@ enum class Nvfp4GeometryId : std::uint8_t {
     N5120K6144,
     N5120K14336,
     N5120K17408,
-    N5120K25600,
 };
 
 inline Nvfp4GeometryId resolve_nvfp4_geometry(std::int32_t output_rows, std::int32_t input_rows) {
@@ -84,10 +85,6 @@ inline Nvfp4GeometryId resolve_nvfp4_geometry(std::int32_t output_rows, std::int
     if (output_rows == Nvfp4N5120K14336::kOutputRows &&
         input_rows == Nvfp4N5120K14336::kInputRows) {
         return Nvfp4GeometryId::N5120K14336;
-    }
-    if (output_rows == Nvfp4N5120K25600::kOutputRows &&
-        input_rows == Nvfp4N5120K25600::kInputRows) {
-        return Nvfp4GeometryId::N5120K25600;
     }
     throw std::invalid_argument("unsupported NVFP4 problem");
 }

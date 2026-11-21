@@ -46,9 +46,6 @@ void launch_nvfp4_a4_tma_linear(Nvfp4GeometryId problem, const Nvfp4A4Operands& 
     case Nvfp4GeometryId::N5120K17408:
         launch<17408>(p, output, stream);
         return;
-    case Nvfp4GeometryId::N5120K25600:
-        launch<25600>(p, output, stream);
-        return;
 #if NINFER_TARGET_RTX5090
     case Nvfp4GeometryId::N5120K14336:
         launch_nvfp4_a4_tma_mma<Nvfp4ScheduleInstance<

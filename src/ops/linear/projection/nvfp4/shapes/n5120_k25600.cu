@@ -44,7 +44,13 @@ void launch_a16(const Tensor& x, const Weight& w, Tensor& y, cudaStream_t stream
 }
 
 Nvfp4A4Route select_a4(std::int32_t tokens) {
-    if (tokens >= 1024) return nvfp4_a4_tma_route<Nvfp4GeometryId::N5120K25600>();
+    // No TMA branch, and the interval below is capped by uses_a4: on this card the A4 contraction
+    // at this K measures a 34 % error from T=1024 up (nvfp4/5120x25600/s717/.../a4/t1024 and /t1025,
+    // one sampled coordinate, deterministic), while the same ladder measures clean at 1023 and for
+    // the K=6144, K=17408 and split K=5120 shapes at 1024 and 1025. 100 K-tiles is the widest A4
+    // problem in the table; the defect is in that route at that width, not in this geometry, so the
+    // route is bounded here and the geometry is not registered as a TMA problem. Above the cap the
+    // dispatch takes the A16 route, which measures clean at 1024 (nvfp4/5120x25600/s713/.../t1024).
     if (tokens <= 64) return nvfp4_a4_mma_route<Geometry, T32R64>();
     if (tokens <= 128) return nvfp4_a4_mma_route<Geometry, T32R128>();
     if (tokens <= 192) return nvfp4_a4_mma_route<Geometry, T64R128>();
@@ -53,7 +59,9 @@ Nvfp4A4Route select_a4(std::int32_t tokens) {
     return nvfp4_a4_mma_route<Geometry, T128R128Resident>();
 }
 
-bool uses_a4(std::int32_t, std::int32_t max_tokens) { return max_tokens >= 8; }
+bool uses_a4(std::int32_t, std::int32_t max_tokens) {
+    return max_tokens >= 8 && max_tokens <= 1023;
+}
 } // namespace
 
 const Nvfp4LinearShape kNvfp4N5120K25600{5120, 25600, launch_a16, launch_nvfp4_a4<select_a4>,
