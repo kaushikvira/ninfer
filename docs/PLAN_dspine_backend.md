@@ -852,6 +852,20 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   (which the engine path needs anyway) before the determinism and multi-round rows mean
   anything.
 
+- **D-2026-11-21-41** — `⚠` **A 26.8 GiB tmpfs artifact was silently eating RAM; housekeeping
+  rule added.** `/tmp/dspine-repro/repro.ninfer` — the P1 converter's determinism probe
+  output, written 06:27 and never cleaned — sat in **tmpfs** (`/tmp` IS RAM on turin),
+  so it was **26.8 GiB of resident RAM** for eight hours. Its *evidence* was already
+  captured (one file sha256, byte-identical payload, recorded in D-20), so the artifact
+  itself was pure residue. Removed: `/tmp` **27 GiB → 1.6 GiB**, `MemAvailable`
+  **84 → 103 GiB** (kept `repro.json`, 2 KB).
+  `⚠` **Rule**: every probe/determinism/reproduction artifact written to `/tmp` is
+  **RAM**, and one of them is 26.8 GiB by construction (a full fused artifact). Delete
+  the payload as soon as its sha is recorded; write big intermediates under
+  `/home/kv/work` instead. This is the third RAM incident of the night (D-27 guard
+  refusal, D-32 worktrees in tmpfs, this) — **on this box, tmpfs habits are the fleet's
+  biggest self-inflicted risk, and they are invisible to `df /`.**
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
