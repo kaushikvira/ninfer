@@ -269,6 +269,17 @@ DFlashFrame::DFlashFrame(MemorySpan backing, const DFlashFrameLayout& layout)
       append_counts(layout.append_counts.bind(backing)), drafts(layout.drafts.bind(backing)) {
     if (layout.candidate_ids) candidate_ids = layout.candidate_ids->bind(backing);
     if (layout.proposal_q) proposal_q = layout.proposal_q->bind(backing);
+    // The DSpine proposal tail's five input streams, bound the same optional-per-arm way as the
+    // two sparse-proposal streams above: a backend that did not allocate the region leaves the
+    // stream a null Tensor, which is what every non-DSpine arm expects. Without these five binds
+    // the regions plan_frames allocated at :196-204 exist in the byte map and in no frame, so
+    // decode.cpp's run_dspine_draft handed execution::dspine_propose_tail five nulls and its own
+    // guard (execution/dspine.cpp:118-121) threw - the seam could never execute.
+    if (layout.bridge_raw) bridge_raw = layout.bridge_raw->bind(backing);
+    if (layout.bridge_rms) bridge_rms = layout.bridge_rms->bind(backing);
+    if (layout.bridge_message) bridge_message = layout.bridge_message->bind(backing);
+    if (layout.proposal_hidden) proposal_hidden = layout.proposal_hidden->bind(backing);
+    if (layout.draw_positions) draw_positions = layout.draw_positions->bind(backing);
 }
 
 ExecutionFrame::ExecutionFrame(MemorySpan backing, const FrameLayout& layout)

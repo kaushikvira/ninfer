@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
-#include <stdexcept>
 
 namespace ninfer::models::qwen3_5::detail {
 namespace {
@@ -30,6 +29,19 @@ Tensor dense_prefix(const Tensor& tensor, std::initializer_list<std::int32_t> sh
 
 void RankProgramImpl::append_draft_history(ComputeOperation& operation) {
     if (!resources.dflash) return;
+    // The DSpine arm of the gate that this seam opened. DSpine shares the masked-draft frame and
+    // the drafter's paged context state (planning/startup.cpp:113), so this call is reached by a
+    // DSpine round - and its body is the DFlash2 context append, which reads
+    // `parameters.profile->config.draft` (execution/draft.cpp:44) and `parameters.draft->` (ibid
+    // :96,:98,:109): both empty for a DSpine profile, whose two drafter configs are populated
+    // mutually exclusively (models/common/dspine/config.h:96-97). The five DSpine draft layers
+    // are probe-only (D-43's open item (c)), so there is no DSpine context append to call. Named
+    // out loud here rather than read through a nullopt.
+    if (backend == SpeculativeBackend::Dspine)
+        throw std::logic_error(
+            "DSpine has no draft-context append: its five draft layers are probe-only, so the "
+            "engine decode loop cannot yet run a DSpine round (the measured seam is "
+            "execution::dspine_propose_tail, driven by the accept probe)");
     const bool forward    = std::holds_alternative<ForwardWork>(operation.request.work.operation);
     const auto batch      = forward ? 1 : static_cast<int>(operation.shape.rows);
     std::uint32_t minimum = std::numeric_limits<std::uint32_t>::max(), maximum = 0;
@@ -229,7 +241,15 @@ void RankProgramImpl::begin_target(ComputeOperation& operation) {
     if (resources.dflash) {
         auto& state = *resources.dflash;
         features.emplace();
-        features->layers = parameters.profile->config.draft->target_layer_ids;
+        // The target taps the feature field is packed by. DFlash's and DFlash2's come out of
+        // `config.draft`; DSpine's out of `config.dspine` (D-20: [1,16,31,46,61], NOT prod's
+        // [5,19,33,47,61]) - the same tap list planning/startup.cpp:126 sized
+        // `spec.dflash.feature_rows` from. The two configs are populated mutually exclusively
+        // (models/common/dspine/config.h:96-97), so the single deref this replaces read a nullopt
+        // for a DSpine plan.
+        features->layers = parameters.profile->config.dspine
+                               ? parameters.profile->config.dspine->target_layer_ids
+                               : parameters.profile->config.draft->target_layer_ids;
         if (forward) {
             features->features  = state.prefill_features.slice(1, 0, width);
             features->positions = state.prefill_positions.slice(0, 0, width);
