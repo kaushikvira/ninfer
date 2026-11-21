@@ -12,6 +12,12 @@ helpers), fed with the CPU decode of the *same NVFP4 bytes* the device gathers.
 
 No kernel was edited. The kernels are the suspects; Tencent's reference is the arbiter.
 
+**This directory carries a second arm now** (`run_head_score_table.py`, the section starting
+"P2 head-format bridge"): the proposal **head** format bridge (`q8_g32_fp16`, the tower's own
+output head) and the **score-table producer** the sampled tail needs — the two gaps D-34 put
+under the kernel-geometry blocker. There a kernel *was* edited, and the P0b head numerics are
+held to bit-exactness by the `run_parity.py` arm above.
+
 ## Verdict (measured 2026-11-22, GPU 1 = RTX PRO 5000, ~25 GiB free window)
 
 | op | table(s) | (a) device-NVFP4 vs CPU decode of the same bytes | (b) device NVFP4 vs device BF16 | teeth |
@@ -97,7 +103,97 @@ cases carry T ∈ {0, 0.05, 0.7, 0.9, 1.0 (with top_k 4), 1.2}; the D-23 **K1** 
   is read nowhere else, and the full array only dilutes the count.
 - `run_serial_tail.py` — the tail: format-invariance control, BF16-vs-NVFP4 score tables,
   teeth. `score_table` is the table-level view of `reference.serial_scores`' `scores`
-  expression (P0b's reference exposes only its argmax).
+  expression (P0b's reference exposes only its argmax). Its 16 x 16 block is stored as
+  `[sender, candidate]`, which is fine for a table it feeds the tail as an input; the table
+  `dspine_serial_scores` *emits* (and the tail reads) is `[candidate, sender]` —
+  `run_head_score_table.py::op_score_table` is that layout.
+- `q8.py` — the tower-head arm: `encode_head` is the int8 / FP16 group quantizer
+  (`integer.cuh::int8_fp16_scale`, `int8_quant_code`), `dequant_head` mirrors
+  `embedding/kernel.cuh::embed_gather_q8_kernel` (FP16 scale per 32-column group, signed code
+  at the `align_up(k, 128)` padded row stride, the product BF16-rounded), plus the four head
+  teeth. Padded on purpose: prod's 5120 is a multiple of 128, so only a padded geometry can
+  show a head read at the packed stride.
+- `run_head_score_table.py` — **the head-format bridge and the score-table producer** (D-34's
+  two gaps; see the next section). Two arms per case: the natural vectors and `headdom`
+  (`rms` x 1e-3, the regime where the ranking *is* the head-term dot — the mirror of the
+  `tgdom` arm above, for the same reason).
+
+## P2 head-format bridge + score table (D-34: measured 2026-11-22, GPU 1 = RTX PRO 5000)
+
+`dspine_serial_scores` took the proposal head as `FP8_E4M3FN_ROW_BF16`, but the head it scores
+against **is the tower's** (`models/qwen3_5/definition.cpp:99` hands the DSpine `Weights`
+`weights.text.output_head`), and the prod tower declares `q8_g32_fp16 [248320, 5120]`. And the
+op computed the K x K score matrix, kept it in shared memory, and emitted only its argmax — so
+the sampled tail, whose *input* is that FP32 `[batch, 16, 16, drafts]` table, had no producer.
+Both are closed; the T=0.9 arm is no longer blocked twice over.
+
+| arm | what is compared | verdict (prod 5120/512/1024, batch 1 and 2; padded 160/64/128; 2 cases x 2 arms) |
+|---|---|---|
+| `A-q8-gather` | device `idx` with a **Q8 head** vs the P0b reference fed the CPU decode of the same bytes | **BIT-EXACT** 240/240 (batch 1), 480/480 (batch 2), every case and arm |
+| `A-score-table` | the emitted FP32 table vs the reference table (normwise: relative Frobenius ≤ 1e-3, pointwise ≤ 2e-2) | **EQUIVALENT-ORDER**, rel-Fro **1.3–1.5e-7**, max relative pointwise ≤ 1.0e-3 |
+| `A-table-argmax` | `argmax(candidate axis)` of the emitted table vs the device `idx` | **BIT-EXACT** — the table is the matrix the argmax collapsed, in the layout the tail reads |
+| `B-fp8-vs-q8` | device FP8-head `idx` vs device Q8-head `idx` (values of one matrix, two formats) | 0–2 of 240 argmax flips; table rel-Fro **6.8e-3** — the representation trade, priced not gated |
+| `C-teeth` | reference-side head-decode defects: scale group offset / dropped sign / **packed (unpadded) code stride** / row-scale broadcast, and the rms·(m·tg) term dropped from the table | every kind bites; `packed_stride_read` only on a **padded** head (205–208 of 240 idx), which is why that geometry is in the suite |
+| `D-compose` | device table → device `serial_tail`: **T=0.9, top_k 20, top_p 1.0, min_p 0.05** (prod) and T=0 | 15/15 drafts per row (30/30 at batch 2) with normalised finite `proposal_q` and every drawn id among the slot's 16 candidates; **T=0 == `serial_scores` + `serial_chain` BIT-EXACT** (D-24's free equivalence, now measured through the composed path) |
+
+**Head format: how Q8 is gathered, with no copy.** `serial_scores_kernel` is templated on
+`HeadQ8` and takes a `HeadRef {codes, scales, row_stride, scale_groups}`; per element it reads
+the signed byte at `row * padded + h`, the FP16 scale of group `h / 32`, multiplies in FP32 and
+rounds the product to BF16 — the addressing and the rounding point of
+`embedding/kernel.cuh::embed_gather_q8_kernel`, which is the in-tree gather of this same
+format. `dspine_bridge.cpp::require_head` accepts exactly `FP8_E4M3FN_ROW_BF16` (RowScale) and
+`Q8_G32_FP16` (RowSplit, group 32, FP16 scales, `k % 32 == 0`, `padded_shape[1] % 32 == 0`, no
+high plane) and names both sides in its message. The evidence that no copy is taken is in the
+kernel (`head.codes` / `head.scales` are the weight's own planes, the row is indexed by
+`cand_s[k]`) and in the memory accounting: prod's head is 1.18 GiB of codes + 76 MiB of FP16
+scales, so a BF16 staging copy of it is +2.35 GiB, a row-scaled-FP8 copy +1.26 GiB, against the
+**1.31568 GiB whole-drafter** budget D-14 sized (D-34's 3.83186 GiB load already counts that head
+once, reused). Nothing in this change allocates.
+
+**Score table: the shape of the output.** Decision: **an optional out-param on
+`dspine_serial_scores`** (`Tensor* scores`, null = today's behaviour), not a sibling op. The
+precedent is in this very file — `dspine_finish`'s optional `stash_raw` — and a sibling op
+would re-run every 5120-wide head dot to recompute the `score_s` matrix the argmax already
+read. Layout is FP32 `[batch, 16 (candidate), 16 (sender), drafts]`, first axis fastest, i.e.
+`((row * 16 + sender) * 16 + candidate) * batch + b` — element-for-element the indexing
+`serial_tail_kernel` already uses (`table[b + batch * (k + 16 * (sender + 16 * i))]`), and
+`A-table-argmax` is the proof that the two agree. The buffer is caller-provided, the write is
+`K*K = 256` fp32 per CTA (15 KiB for a prod round), no allocation, no host sync, so the graph
+capture/replay contract of D-25 is untouched.
+
+```sh
+cmake --preset rtx5090-ops && cmake --build build/rtx5090-ops --target ninfer_ops -j 4
+cd tests/dspine_parity_nvfp4 && ./fixture/build.sh
+CUDA_VISIBLE_DEVICES=1 ./run_head_score_table.py --cases 2 --device 0                    # prod
+CUDA_VISIBLE_DEVICES=1 ./run_head_score_table.py --cases 1 --device 0 --batch 2          # batch 2
+CUDA_VISIBLE_DEVICES=1 ./run_head_score_table.py --cases 1 --device 0 \
+    --hidden 160 --rank 64 --vocab 128 --pad 1                                           # padded stride
+```
+
+The head and its tables are the P0b vectors at the P0b seeds, so `B-fp8-vs-q8` compares two
+representations of one matrix (the FP8 head's own dequantized values, re-quantized to Q8), not
+two datasets. The Q8 head of the prod geometry is 5.0 MiB of codes + 0.32 MiB of scales: this is
+a small-memory arm, and the device window it needs is the fixture process, not the artifact.
+
+### Why the score table is judged normwise, and what `headdom` is for
+
+The table is a matrix-family reduction (a 5120-term dot through the head, an R-term dot), and
+the device order is fixed by the kernel (16 strided partial sums, then a sequential combine)
+where NumPy reduces pairwise. The clean case measures 1.3e-7 relative Frobenius and up to 1.4e4
+raw fp32 ulps of *pointwise* distance — cancellation inside a wide dot, invisible in norm, so
+the ulp band that suits `rms` (a 5120-wide sum of squares) is the wrong yardstick here: the
+op-development rule for this family is normwise with a gross pointwise ceiling, and the teeth
+(`tg` term dropped: rel-Fro 4.3e-2) sit two to three orders above the band. The argmax rows
+(`A-q8-gather`, `A-table-argmax`) stay at zero band, which is what makes a head defect
+visible at all.
+
+`headdom` (`rms` x 1e-3) is the counterpart of the `tgdom` arm above. `serial_scores`' ranking
+is `base(head) + rms * (m · tg)`, and which term decides the argmax is a property of the
+vectors, so at the natural scale `row_scale_broadcast` moves 41–48 of 240 argmaxes while
+`sign_ignored` moves 224 — a tooth the natural arm cannot see is reported, not hidden, and the
+arm where that term decides the ranking is where it must bite. `packed_stride_read` is inert by
+construction at an unpadded head (the driver says so); it is the padded geometry that gives it
+205–208 of 240.
 
 ## Found in passing: the 1.3157 GiB artifact cannot be bound today (P2 integration, not a kernel gap)
 
@@ -130,3 +226,16 @@ the binding path's code, plus the manifest above.
 - The `--nvtbl` divisor is parsed with `strtof`: a numpy-scalar `repr` (`np.float32(2688.0)`)
   parses to **0** and the op then rejects the weight. The fixture now dies on a
   non-positive divisor instead of sending a dead table.
+- **The score table's 16 x 16 block is `[candidate, sender]`, first axis fastest** —
+  `table[b + batch*(k + 16*(sender + 16*i))]` in `serial_tail_kernel`, `k` the candidate. A
+  score-table builder that stores `[sender, candidate]` (as `run_serial_tail.py::score_table`
+  does, harmlessly, because there the table is only an input) feeds every slot the *transposed*
+  candidate set. Measured symptom in the first version of this harness: the table comparison
+  came back at **2.2e9 raw fp32 ulps** (2 octaves of a float — not a numerics magnitude, the
+  fingerprint of comparing the wrong elements), and only the layout fix brought it to the
+  1e-7-of-the-matrix norm it now reports.
+- `dspine_serial_scores` gates the head on `qtype`/`layout` **only** — so a fixture `Weight` with
+  an empty `shape`/`padded_shape`/`ndim` passes it, and the first gate that reads the geometry
+  (`require_head`) turns the empty `padded_shape[1]` into a dereference of `scales + 0` inside
+  the kernel. Any new `Weight` a fixture builds must carry the geometry
+  `weight_view.cpp::native_weight` would give it.

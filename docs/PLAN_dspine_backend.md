@@ -130,6 +130,14 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 - open-risks: R5 drift (8–10 wk, MED) · R3 V3-tower accept (P2) · R4 accept
   <~5 tok/round (P2 now owns it)
 - last-gate: **P0c decided 2026-11-22 → (c) skip** (`D-2026-11-21-17`)
+- p2-gaps: **the two D-34 gaps below the shapes are CLOSED** (`D-2026-11-21-36`): the proposal
+  head is the tower's `q8_g32_fp16` and `dspine_serial_scores` now gathers it (dequant on
+  gather, no copy: 2.35 GiB of BF16 staging that D-14's sizing has no room for), and the op
+  emits the tail's FP32 `[batch,16,16,drafts]` score table as an out-param. Measured: Q8-head
+  `idx` **bit-exact** (240/240, 480/480 at batch 2), the table **normwise clean**
+  (rel-Fro 1.3e-7), table-argmax == `idx`, teeth all bite (the padded-stride tooth needs the
+  padded geometry), and **composed `serial_scores → serial_tail` at T=0 == the greedy pair
+  bit-for-bit**. P3 gate stays **2/5**; criteria 3–5 now sit behind the forward's shapes only.
 - artifacts: port worktree `/tmp/ninfer-dspine-port` (branch `feat/dspine-port`
   off `f9c00d50`, = main + docs) · fork clone `/tmp/ninfer-dspine-review` ·
   Tencent reference clone `/tmp/dspine-ref`
@@ -689,6 +697,64 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   last edit, may not have reconfigured, and a test they "registered" may never have
   been compiled. The subagent's own digests are evidence *about their tree*, not about
   `feat/dspine-spec-backend`.
+
+- **D-2026-11-21-37** — **THE PROPOSAL HEAD IS THE TOWER'S OWN: THE Q8 G32 BRIDGE AND THE
+  SCORE-TABLE PRODUCER ARE BOTH CLOSED (D-34's gaps (i) and (ii)).** The shapes instantiation
+  (35) cleared the geometry gate; the two gaps below it are now cleared too, and neither needed
+  a format decision, a copy, or an allocation.
+  **The head.** `models/qwen3_5/definition.cpp:99` hands the DSpine `Weights` the tower's
+  **`output_head`** — `q8_g32_fp16 [248320, 5120]`, `QuantLayout::RowSplit`, FP16 scales per
+  group of 32 — while `dspine_serial_scores` demanded `FP8_E4M3FN_ROW_BF16` (RowScale). A
+  **dequant-on-gather arm, not a conversion**: the head row is gathered by candidate id exactly
+  as the codebook/tg/tsv rows are, and the Q8 arm reads the signed byte at `row * padded + h`
+  plus the FP16 scale of group `h / 32`, multiplies in FP32 and BF16-rounds the product — the
+  addressing and the rounding point of `ops/embedding/kernel.cuh::embed_gather_q8_kernel`, the
+  in-tree gather of this same format. `require_head` accepts the two representations and names
+  both sides of every refusal (`layout RowScale … q8_g32_fp16 wants RowSplit`).
+  **Why no copy is the sizing question, not a style preference:** the head is **1.18 GiB** of
+  int8 codes + **76 MiB** of FP16 scales; a BF16 staging copy is **+2.35 GiB**, a
+  row-scaled-FP8 copy **+1.26 GiB** — against the **1.31568 GiB whole-drafter** budget D-14
+  sized, inside the **3.83186 GiB** D-34 load that counts this head once as reused. The kernel
+  reads `head.codes` / `head.scales` directly, so the change adds zero bytes.
+  **The table.** `dspine_serial_scores` grows an **optional caller-provided `scores` out-param**
+  (null = today's behaviour) — the precedent is this file's own `dspine_finish`/`stash_raw`. A
+  sibling op was rejected: the score matrix *is* the K `base_k` dots (5120-wide) plus the K
+  `rms·(m·tg)` dots, so a second op re-runs all 256 of them per row to recompute what the argmax
+  already read. The kernel writes the `score_s` shared matrix it argmaxes, so `idx` numerics
+  cannot move; layout is FP32 `[batch, 16 (candidate), 16 (sender), drafts]`, first axis fastest
+  — element-for-element the indexing `serial_tail_kernel` already uses — **15 KiB per prod
+  round**, no allocation, no host sync, D-25's graph contract untouched.
+  **Measured** (`tests/dspine_parity_nvfp4/run_head_score_table.py` + `q8.py`, prod
+  `5120/512/1024` batch 1 and 2, and a **padded** `160 → 256` head; 2 cases × 2 arms):
+  | arm | verdict |
+  |---|---|
+  | device `idx` with a Q8 head vs the P0b reference on the CPU decode of the same bytes | **BIT-EXACT 240/240** (480/480 at batch 2), every case/arm |
+  | emitted FP32 table vs reference table (normwise: rel-Fro ≤ 1e-3, pointwise ≤ 2e-2) | **EQUIVALENT-ORDER**, rel-Fro **1.3–1.5e-7**, max relative pointwise ≤ 1.0e-3 |
+  | `argmax(candidate axis)` of the emitted table vs device `idx` | **BIT-EXACT** — the table and the argmax are one matrix |
+  | device FP8 head vs device Q8 head | 0–2 of 240 argmax flips; table rel-Fro **6.8e-3** — the representation trade, priced not gated |
+  | head teeth (scale-group offset, dropped sign, **packed unpadded code stride**, row-scale broadcast) + `rms·(m·tg)` dropped from the table | all five kinds bite; the stride tooth **only exists on a padded head** (205–208 of 240 idx) — which is why that geometry is in the suite |
+  | device table → device `serial_tail`, **T=0.9 top_k 20 top_p 1.0 min_p 0.05** and T=0 | 15/15 drafts per row (30/30 at batch 2), finite normalised `proposal_q`, every drawn id among the slot's 16 candidates; **T=0 == `serial_scores` + `serial_chain` BIT-EXACT** through the composed path |
+  **The score table is a matrix-family reduction, judged normwise** (op-development rule): the
+  device order is fixed by the kernel (16 strided partial sums, sequential combine) where NumPy
+  reduces pairwise, so the same vectors differ by cancellation — 1.4e4 raw fp32 ulps pointwise
+  against 1.3e-7 relative Frobenius. `rms`' ulp band is the wrong yardstick for it; the argmax
+  rows stay at zero band, which is what makes a head defect visible at all. The driver runs a
+  **`headdom` arm (`rms` × 1e-3)** as the mirror of P1's `tgdom`: `serial_scores`' ranking is
+  `base(head) + rms·(m·tg)` and which term decides the argmax is a property of the vectors, so a
+  tooth the natural arm cannot see is **reported, not hidden**.
+  `⚠` **Two fixture facts this surfaced.** (a) **The P0b fixture built its fp8 head `Weight`
+  with `ndim = 0` and zeroed `shape`/`padded_shape` for months** — no consumer read them, so the
+  first op to measure the head refused it and died in `Tensor::data()`'s
+  `runtime_check(notes_ != nullptr)`. The geometry is now filled as `weight_view.cpp` fills it
+  (P0b README). (b) **`CUDACXX=/usr/local/cuda/bin/nvcc` (the symlink) configures CXX targets
+  with no `-isystem …/targets/x86_64-linux/include`**, so `tests/test_host_timing.cpp` fails on
+  `nvtx3/nvToolsExt.h` in a fresh `rtx5090-ops` build; the resolved
+  `/usr/local/cuda-13.1/bin/nvcc` (what `build/rtx5090-dev` carries) compiles it. Use the
+  resolved path in new worktrees.
+  **Gate: P3 stays 2/5** — criteria 1–2 green, and criteria 3–5 now sit behind the forward's
+  instantiated shapes (35) alone, not behind these two. Code: `ops/dspine_bridge/{kernels.cu,
+  dspine_bridge.cpp, launch.h}`, `include/ninfer/ops/dspine_bridge.h`, the two parity fixtures,
+  `tests/dspine_parity_nvfp4/{q8.py, run_head_score_table.py, README.md}`.
 
 ## OBJECTIVE
 

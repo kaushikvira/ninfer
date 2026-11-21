@@ -64,6 +64,13 @@ rounding points.
   (row-major: `data[row*k + col]`), the opposite of the Tensors.
 - **`cand`/`idx` are `(16, drafts, batch)` = (slot, row, batch)**; the chain walk
   is `cand[j, i, b]` / `idx[j, i+1, b]` (the Tencent ref uses `(row, slot)` order).
+- **The fixture's fp8 `head` `Weight` must carry `ndim = 2` and its `shape`/`padded_shape`**
+  (P2b finding): it was built with `ndim = 0` and zeroed shapes, which no consumer read —
+  `dspine_serial_scores` gates the head on qtype/layout only. The first op to *measure* the
+  head (P2b's Q8 head gate, `ops/dspine_bridge/dspine_bridge.cpp::require_head`) took
+  `padded_shape[1] = 0` as a refusal and died in `Tensor::data()`'s
+  `runtime_check(notes_ != nullptr)`. A fixture `Weight` that only one op ever reads is not a
+  weight; the geometry is filled in as `weight_view.cpp::native_weight` fills it.
 
 ## Build & run
 
