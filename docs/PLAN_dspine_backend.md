@@ -151,7 +151,11 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **tmpfs RAM sinks** (`/tmp` is RAM here) and `MemAvailable`. Report caps at 12 lines and
   names the next best action if main looks stuck.
 
-- phase: **P2 — RESET DONE, ACCEPTANCE PROVEN UNMEASURABLE IN THE PROBE (D-42)**.
+- phase: **P2 — EXECUTOR ROUND WRITTEN (walk + append + Parameters), `dspine_walk` NEVER
+  EXECUTED (D-49); next = port-fidelity probe (append→walk→tail vs the probe's walk,
+  ≥32 rounds).**
+- OLD phase note (D-42, still true of the probe): **RESET DONE, ACCEPTANCE UNMEASURABLE IN
+  THE PROBE**.
   `0201b102`: round reset ⇒ a round is a pure function of its inputs (`0 of 37 byte
   streams part` over 32 rounds, alloc-free green). **Acceptance needs the target's
   logits and there is no DSpine accept wiring** — drafts are never verified — so
@@ -1125,6 +1129,48 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   `#71`'s device setup and **did not hang** ⇒ localize `#70` to **its own setup code**,
   not the library set. The working pattern for a device probe in this family is now
   `test_dspine_tail_cost.cpp`.
+
+- **D-2026-11-21-49** — **THE ROUND IS EXECUTOR CODE (walk + context append + Parameters
+  binding) — but `dspine_walk` HAS NOT EXECUTED.** Merged `dfb0bcbf`/`71b791fd` (from
+  `53f09fa9`/`bcad6034`/`95f462ad`, 821 insertions / 8 files). Both named gaps are closed
+  **in code**: `dspine_append_context` (tap field → `feature_projection` → `context_norm`
+  → per-layer context K/V out of the packed parent → key norm → RoPE →
+  `kv_cache_append_prefix`) and `dspine_walk` (masked block, embedding, 5 × {split QKV,
+  head norms + RoPE, **paged context attention**, out + residual, post-norm, SwiGLU, down}
+  + 7-step bridge), ported step-for-step from the probe, plus `DspineParameters` binding the
+  five layers + bridge (sliced from the two **stacked** objects, **no weight copied**,
+  `weight_bank.cpp:117` mechanism). `decode.cpp:31`'s throw is gone; `run_dspine_draft`
+  runs **walk then tail**; startup reserves the walk's arena peak.
+  **DFlash2 surface = exactly the 3 removed throw/comment lines**; everything else is a
+  dspine-only function/struct or a `backend == Dspine` arm.
+  **Evidence run**: full build **1067/1067, 0 errors**; the **untouched** probe
+  `dspine_forward_real` green (**22/22, 3514 steps**); `dspine_tail_cost` green (K=15
+  **1.543 ms**, exponent 0.053 — reproduces D-48); `dspine_real`/`dspine_loading_real`/
+  `dspine_shapes_real` green; and **I re-ran the parity rows myself on GPU 1** after the
+  `proposal_q` change: `ninfer_dspine_serial_tail_op_test` **OK 4 cases / 0 skipped** +
+  host-core oracle green ⇒ **no recorded row moved**.
+  `⚠` **THE HONEST GAP**: **`dspine_walk` has never executed.** No probe drives it, and the
+  decode loop sits behind a full target tower (24 GiB) that cannot co-reside with the
+  drafter in GPU 1's 25 GiB ⇒ **the port is STRUCTURAL (step order, op identity, shapes
+  from the probe), not bit-parity.** The agent refused to fabricate a round count —
+  correct.
+  **Decisions reviewed and ACCEPTED** (each was flagged by the agent, none is a widening):
+  1. **`dspine_propose_tail` now zeroes `proposal_q`** — `serial_tail` writes only the
+     *walked sender row* (`dspine_serial_tail.cpp:258-268`) while step 5 publishes the whole
+     grid, so un-zeroed it published the **previous round's** rows (a D-42 purity bug). It
+     touches a production-path function's output **for batch>1 only**, and **both parity
+     tests stayed green** (verified by me, above).
+  2. **Batch-1 gate at `run_dspine_draft`** — `bridge_message` is handed unprefixed a few
+     lines below, so batch>1 would silently share one row's proposal; now a **loud refusal**.
+  3. **Context Q computed-and-dropped** — at T=16 only the packed parent + `linear_split`
+     are compiled (D-35), so Q is written to freed scratch: the measured cost of the
+     missing context geometry, consistent with D-39's accepted waste.
+  4. No CUDA graph profile (unchanged, D-45 refuses loudly).
+  **NEXT (recorded, and the only way to make this claim real)**: a probe driving
+  **append → walk → tail over `parameters.dspine`** for ≥32 rounds, comparing the four
+  published frame streams against the probe's walk — a **port-fidelity** test — using
+  `test_dspine_tail_cost.cpp`'s device setup **verbatim** (D-47: hand-rolled setups hung
+  twice).
 
 ## OBJECTIVE
 
