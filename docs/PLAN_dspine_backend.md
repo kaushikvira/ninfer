@@ -131,6 +131,29 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   concurrent set). **DSpine end-state is BETTER than DFlash2 today** on VRAM +
   KV. Closes the KV gate (D-10 re-open).
 
+- **D-2026-11-21-15** — `⚠` **THE V3 DFLASH2 DRAFTER IS STOCK, NOT TAILORED TO
+  V3.** Decisive: `pipeline/dflash2-retrain/README.md` is a pipeline built to
+  retrain a drafter for "the NInfer Swift-1.5 V3 27B target" → it is NOT RUN
+  (no `LOG.md`/`results/`), no promoted-retrained-drafter record → prod runs
+  the **stock** drafter. (a) z-lab card = "mirror of `incoai/Qwen3.8-27B-
+  DFlash2`", base `Qwen/Qwen3.8-27B`; (b) our taps `[5,19,33,47,61]` = the
+  *retrain recipe's* stock geometry = `dflash.py:120` `2560×num_hidden_layers(64)`
+  = **stock 27B's 64 layers**; (c) v3 recipe = quantize→convert→`dflash2 +
+  proposal head` = **repackage**, no drafter-train; (d) the retrain README
+  itself: *"the **unmodified drafter** scored 0.3-1.1% acceptance"* on a
+  fine-tuned tower (stock drafters **degrade on post-towers**).
+- **D-2026-11-21-16** — `⚠` **SUCCESS ODDS RAISED (supersedes the 55-65% read).**
+  Both drafters stock → the **stock→V3 gap hits DSpine AND the DFlash2 baseline
+  EQUALLY** → the **relative delta transfers → R3 is NOT decisive** (my
+  "tailored baseline is a harder bar" claim is void). **`block_size` asymmetry:**
+  the z-lab card's DFlash2 base drafter = **`block_size 8` (K≈7)**; prod
+  `NINFER_DRAFT_TOKENS` 7→15 (2026-10-16) → **prod runs a K≈7-trained drafter at
+  K=15 → under-trained beyond ~7 → DFlash2 headroom-limited.** **DSpine
+  (block-16-trained, card 5.58/5.11) is K-matched → headroom DFlash2 lacks.**
+  SUCCESS ~**65-75%**. **Bonus: `pipeline/dflash2-retrain/` = a stock→V3 retrain
+  capability (retrain the drafter for V3) — a DFlash2 path AND the DSpine
+  ceiling-raiser.**
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
