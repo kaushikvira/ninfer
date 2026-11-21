@@ -574,9 +574,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   projection `[5120,25600]`, split q/k/v `[6144,5120]`, attention out `[5120,4096]`
   were refused at a **host-side shape lookup before any launch** — **CLEARED by shape
   instantiation** `4ddee03a` (D-35): 6 REFUSED → **16/16 COMPILED**, split tiling =
-  the drafter's own 4096/1024/1024. Remaining forward gaps: **head-format bridge**
-  (`q8_g32_fp16` vs the op's `FP8_E4M3FN_ROW_BF16`) + **no score-table producer**
-  (in flight `mwqbcurg-fa28`). **`⚠` P3 is NOT reachable tonight** (D-34).
+  the drafter's own 4096/1024/1024. Remaining forward gaps were the **head-format
+  bridge** + the **score-table producer** — **BOTH CLOSED** `b689e4e0` (D-37): q8_g32
+  head via dequant-on-gather (no copy), table as an out-param, `T=0` equals the greedy
+  pair bit-exact, `idx` still 240/240 bit-exact. **`⚠` P3 still not reachable tonight**
+  (D-34) — the forward WALK itself (block arrangement → 5 layers → proposal logits) is
+  still unwritten, and criterion 5 (≥ DFlash2 K7) has never been measured.
 
 - **D-2026-11-21-32** — `⚠` **`/tmp` IS tmpfs ON TURIN (RAM-backed) — worktrees and
   build dirs there were eating the fleet's RAM floor.** The watchdog caught "the
@@ -689,6 +692,39 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   last edit, may not have reconfigured, and a test they "registered" may never have
   been compiled. The subagent's own digests are evidence *about their tree*, not about
   `feat/dspine-spec-backend`.
+
+- **D-2026-11-21-37** — **BOTH REMAINING FORWARD GAPS CLOSED, WITH THE COMPOSED PATH
+  MEASURED ON DEVICE.** Merged `b689e4e0` (from `a437473c`/`52acea4f`/`1d8f0812`).
+  **(1) Head bridge — dequant on gather, zero copy**: `serial_scores_kernel` gained a
+  templated `HeadQ8` arm reading a `HeadRef {codes, scales, row_stride, scale_groups}`
+  — signed byte at `row*padded+h` × the FP16 scale of group `h/32`, FP32 multiply,
+  BF16 round, i.e. the addressing/rounding of the in-tree `embed_gather_q8_kernel` for
+  this same format. `require_head` accepts exactly `FP8_E4M3FN_ROW_BF16` and
+  `Q8_G32_FP16` and **names the field a head fails on**. A BF16 staging copy would
+  have been **+2.35 GiB** — i.e. it would have broken D-14's 1.31568 GiB drafter
+  sizing, so the bridge was the only acceptable answer.
+  **(2) Score-table producer — an optional out-param** (precedent: this file's
+  `dspine_finish`/`stash_raw`), FP32 `[batch,16,16,drafts]`, **15 KiB per prod round**,
+  graph contract untouched. A sibling op was **rejected on evidence**: the table *is*
+  the 256 × 5120-wide dots the argmax already reads.
+  **Measured (GPU 1)**: Q8-head `idx` vs the P0b reference **BIT-EXACT 240/240**
+  (480/480 batch 2) · `argmax(table)` vs device `idx` **BIT-EXACT** · table vs
+  reference **rel-Fro 1.3–1.5e-7** (band 1e-3), pointwise ≤1.0e-3 (ceiling 2e-2) ·
+  **FP8 vs Q8 head: 0–2/240 argmax flips, table rel-Fro 6.8e-3** — the representation
+  trade, **priced** · **COMPOSE: table → `serial_tail` at T=0.9/top_k 20/min_p 0.05 and
+  at T=0 → 15/15 drafts, and `T=0` EQUALS the greedy pair bit-exact**.
+  **Regressions unmoved**: P0b rows **row-for-row identical** (`idx` 240/240, `rms`
+  33–34 ulp, `finish` 215 × 1-ulp signed-zero, `chain` 15/15); NVFP4 gather and serial
+  tail harnesses exit 0. Teeth: head (scale-group offset, dropped sign, **unpadded
+  stride**, row-scale broadcast, dropped `rms·(m·tg)`) each bite; **16/16 gate arms
+  rejected naming the field**. Table band is a **gross-error ceiling** (clean case sits
+  3–4 orders inside), not a precision target — the precision claim is the bit-exact
+  argmax rows. `⚠` Parity is against reference **math on CPU-decoded bytes at 1024 head
+  rows** (~5 MiB), NOT a prod-vocab (248320 ≈ 1.28 GiB) device gather; the prod GiB
+  figures are arithmetic from the manifest, not a measurement.
+  **Post-merge verification in flight `mwqegyzi-2d8b`** (the new D-36 gate: build the
+  merged tree, then the CPU suite; the agent's own suite counts were from a different
+  preset and are NOT comparable to the 82/9/113 baseline).
 
 ## OBJECTIVE
 
