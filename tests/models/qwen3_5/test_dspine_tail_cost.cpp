@@ -562,6 +562,29 @@ double bridge_round_trip(Probe& probe, Tail& tail, std::vector<std::int32_t>& fr
     return elapsed.count();
 }
 
+// The round's own proof that the launches did work: the tail published a draft id in every slot,
+// and the head named a candidate row for every (candidate, slot). A cost curve of ops that refused
+// to run would be the fastest curve on the machine, so this rides with every K.
+void publish_check(Probe& probe, Tail& tail) {
+    const CudaDeviceScope settling(probe.device);
+    cuda_ok(cudaDeviceSynchronize(), "the round's outputs before the publish check");
+    std::vector<std::int32_t> published(std::size_t(tail.tail_drafts.numel()));
+    download(published.data(), tail.tail_drafts.data,
+              published.size() * sizeof(std::int32_t), "published drafts");
+    std::int32_t filled = 0;
+    for (const auto id : published) { filled += id != 0; }
+    std::vector<std::int32_t> named(std::size_t(tail.candidates.numel()));
+    download(named.data(), tail.candidates.data, named.size() * sizeof(std::int32_t),
+              "head candidate rows");
+    std::int32_t rows = 0;
+    for (const auto id : named) { rows += id != 0; }
+    std::printf("        the round published %d of %d drafts and the head named %d of %d "
+                "candidate rows\n",
+                int(filled), int(kBatch * tail.drafts), int(rows),
+                int(kSlots * tail.drafts * kBatch));
+    std::fflush(stdout);
+}
+
 // ---------------------------------------------------------------- the statistics -------------------
 
 struct Cost {
@@ -762,10 +785,15 @@ int main(const int argc, char** argv) {
             scores_clock.events.clear();
             tail_clock.events.clear();
             chain_clock.events.clear();
-            std::printf("round at K=%d: drafts=%d, the score table's grid is %d CTAs x (16 head-row "
-                        "gathers over %d + 16x16 dots over %d)\n",
-                        drafts, drafts, drafts, int(probe.target.hidden_size),
-                        int(probe.config.bridge.rank));
+            std::printf("round at K=%d: the score table is %d CTAs (one per proposal row) x (16 "
+                        "head-row gathers over %d = %d dequantised elements + a 16x16 terminal grid "
+                        "over the rank %d = %d FMA); the K-by-K grid of the op is over its 16 "
+                        "CANDIDATE axes (the artifact's head_topk), and the draft count is its CTA "
+                        "count\n",
+                        drafts, drafts, int(probe.target.hidden_size),
+                        int(kSlots * probe.target.hidden_size), int(probe.config.bridge.rank),
+                        int(kSlots * kSlots * probe.config.bridge.rank));
+            publish_check(probe, tail);
             report("head_topk", drafts, topk_cost);
             report("score_table", drafts, scores_cost);
             report("serial_tail", drafts, tail_costs);
@@ -849,6 +877,16 @@ int main(const int argc, char** argv) {
         std::printf("CEILING: K=%d can publish at most %d accepted drafts/round; the bar is %.3f, "
                     "so the headroom the extra window must beat is +%.3f\n",
                     widest, widest, bar, double(widest) - bar);
+        const auto tokens_per_round = bar + 1.0;
+        const auto tok_s            = tokens_per_round / (round_ms / 1000.0);
+        const auto carried          = round_ms + widest_cost;
+        std::printf("PROD-SCALE: the bar's %.3f accepted + the verified target token over prod's "
+                    "%.3f ms/round = %.1f tok/s; a round that carries the whole %.3f ms DSpine tail "
+                    "on top runs %.1f tok/s at the SAME acceptance, %.2f %% of it, so the acceptance "
+                    "the wide window must add to break even is +%.2f %%\n",
+                    bar, round_ms, tok_s, widest_cost, tokens_per_round / (carried / 1000.0),
+                    100.0 * tokens_per_round / (carried / 1000.0) / tok_s,
+                    100.0 * (needed(widest_cost) - bar) / bar);
         std::fflush(stdout);
         return 0;
     } catch (const std::exception& error) {

@@ -174,15 +174,21 @@ set_tests_properties(
   ninfer_qwen3_5_state_image_test
   PROPERTIES SKIP_RETURN_CODE 77 LABELS "gpu")
 
-# The DSpine proposal-tail COST curve (D-43's perf question, the criterion ⑤ denominator). It is a
-# benchmark, and it is registered as a test because the probe that carries the tail's cost arms has
-# to initialise CUDA the way the forward probe does: the same binary in the bench/ closure stops at
-# the device bind with cudaErrorMemoryAllocation (and under lazy module loading it stops silently),
-# while this closure reaches the device in 0.2 s. Same sources, same libraries as the forward
-# probe, plus the execution tail it costs. Opt-in by NINFER_TEST_ARTIFACT + NINFER_TEST_DEVICE
-# (D-29), skips exit 77, and it is RUN_SERIAL because it is a timing run.
+# The DSpine proposal-tail COST curve (D-43's perf question, the criterion ⑤ denominator): the
+# cost per round of linear_topk + dspine_serial_scores + dspine_serial_tail at K = 1, 3, 7, 15 on
+# the real head/tg/tsv, CUDA-event timed, with the measured scaling exponent against the K^2
+# reading and the break-even acceptance the wide window has to buy. It is a benchmark, and it is
+# registered as a test because the probe that carries the tail's cost arms has to initialise CUDA
+# the way the forward probe does: the same binary in the bench/ closure stops at the device bind
+# with cudaErrorMemoryAllocation (and under lazy module loading it stops silently), while this
+# closure reaches the device in 0.29 s. Its device setup is a verbatim copy of the forward probe
+# below - the same Probe struct, the same materialization set, the same sources and libraries -
+# because that is the probe family that runs this artifact (D-45: the #70 sibling stops before its
+# first line, so the working path is the only accepted setup). Opt-in by NINFER_TEST_ARTIFACT +
+# NINFER_TEST_DEVICE (D-29), skips exit 77, and it is RUN_SERIAL because it is a timing run.
 ninfer_add_test(ninfer_qwen3_5_dspine_tail_cost_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_tail_cost.cpp"
+          "${PROJECT_SOURCE_DIR}/src/models/common/dspine/dspine_serial_tail.cpp"
   LIBRARIES ninfer_model_loading ninfer_ops)
 set_tests_properties(ninfer_qwen3_5_dspine_tail_cost_test PROPERTIES
   SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 3600)
