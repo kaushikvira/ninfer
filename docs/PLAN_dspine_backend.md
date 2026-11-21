@@ -404,6 +404,37 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   6. No tolerance widening, no test deletion, no silent fallbacks — a red result
      is a documented finding, never a green.
 
+- **D-2026-11-21-27** — **NVFP4 GATHER PATH SOUND (D-20 dependency closed) + a NEW
+  BINDING BLOCKER.** Measured on GPU 1 (25.3 GiB free, prod geometry H5120/R512/
+  C1024/W16, ops at `a7888dec`, `sm_120a`): device NVFP4 gather vs **CPU dequant of
+  the identical bytes** — `normalize_codes` anchors **BIT-EXACT 0 ulp**
+  (1024/1024, 2 cases), `serial_scores` **idx BIT-EXACT 240/240** (4 sets),
+  `serial_tail` **format-invariant** (no Weight; same table ⇒ byte-identical
+  drafts/idx/proposal_q, 3/3). Teeth: 4 gather defects (scale-plane addressing,
+  E2M1 nibble swap, dropped divisor, sign) — normalize 4/4 DIVERGENT, tail 4/4
+  move the draws; `serial_scores`' **argmax is a documented weak-teeth surface**
+  at natural rms (only the divisor bites; the 5120-wide H term dominates) ⇒ a
+  tg-dominant set (rms×1000, same bytes both sides) where all 4 bite. BF16-vs-NVFP4
+  drift is the **D-20 trade, not a defect**: codes to 16288 bf16 ulp (codebook
+  zeroes 18 % at rel-Fro 0.095), idx 0–1 flips at P0b scale / 25–27 of 240
+  tg-dominant, tail 1–8 of 15 drafts, 224/240 proposal_q — **sensitivity, not an
+  accept rate**; the A/B must price it (D-24 A1).
+  `⚠` **BLOCKER — the D-20 sizing artifact cannot load today**:
+  `weights.cpp:46,56,57` bind `bridge/codebook|tg|tsv` with `b.direct()`'s default
+  `QType::BF16`; the artifact declares `nvfp4/block_scale_k16_m128x4_v1`
+  (`codebook [248320,1024]`, `tg [248320,512]`, `tsv [248320,1024]`) and
+  `artifact/binder.cpp:49-53` rejects the mismatch. The op layer already validates
+  NVFP4 (`require_table`/`validate_nvfp4_weight`, N%128/K%64, aligned planes), so
+  this is a **per-artifact binding choice**. Until fixed, **only the 2.1667 GiB
+  BF16-table artifact is loadable** ⇒ the D-14 −1.06 GiB sizing is **unreachable**
+  (fallback costs +0.85 GiB ⇒ ~60k fewer device-KV tokens).
+  Contract facts pinned: `serial_scores` enforces `tg.qtype == tsv.qtype`;
+  `validate_nvfp4_weight` needs N%128/K%64 + positive finite `weight_scale` **and**
+  `input_scale`; a `repr(np.float32)` divisor string silently `strtof`s to 0.
+  **Also**: the running harness/op tests read the real artifact at **~42 GiB RSS**,
+  which trips the fleet RAM guard — a device window that also loads the artifact
+  must budget RAM, not just VRAM.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
