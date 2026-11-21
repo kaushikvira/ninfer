@@ -37,13 +37,14 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
-- phase: **P0 — GATED on 2 user decisions; NOT launched** (see **HANDOFF**)
-- done: plan; 3 reviews (self / verifier `mwpxt2ws` inline + full); spine
-  verified (D-01 license, D-05 T=0.9, D-02 map, 5090-fits); fixes → **D-10..13**
-- next: **get 2 user decisions → P0a+P0b fan-out (opus-5) → P0c per D-11**
+- phase: **P0 — GATED on P0c (1 gate); NOT launched** (see **HANDOFF**)
+- done: plan; 4 reviews (self / verifier `mwpxt2ws` / D-14 drafter-swap /
+  `mwpya6mp` coherence); spine verified (D-01 license, D-05 T=0.9, D-02 map,
+  5090-fits, D-14 drafter-swap); fixes → **D-10..14**
+- next: **get the P0c decision → P0a+P0b fan-out (opus-5) → P0c per D-11**
 - open-risks: R5 drift (8–10 wk, MED) · R3 V3-tower accept (P2) · **P0c
   feasibility (D-11)**
-- last-gate: verifier → **SOLID-WITH-FIXES**; all fixes recorded; 2 gates open
+- last-gate: `mwpya6mp` coherence verifier **PENDING**; **1 gate open (P0c)**
 
 ## DECISION LEDGER (append-only; `⚠` = a correction, obey it)
 
