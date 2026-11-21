@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace ninfer::artifact {
@@ -40,6 +41,14 @@ struct Config {
     std::uint32_t head_topk               = 0;
     std::uint32_t trained_block_size      = 0;
     std::uint32_t sliding_window          = 0;
+    // code_bridge_second_pass: the serial tail's own schedule. The first
+    // `second_pass_first_exact` block positions are taken exact, the rest are drawn through the
+    // head's top-k; `second_pass_mode` is the validated mode string the tail is built for.
+    std::uint32_t second_pass_first_exact = 0;
+    std::uint32_t second_pass_head_topk   = 0;
+    std::string second_pass_mode;
+    // selected_prefix_decode_mode: the validated bridge decode mode ("serial").
+    std::string decode_mode;
 
     [[nodiscard]] std::uint64_t query_width() const noexcept {
         return std::uint64_t(num_attention_heads) * head_dim;

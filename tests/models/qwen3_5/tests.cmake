@@ -10,6 +10,15 @@ ninfer_add_test(ninfer_qwen3_5_dspine_loading_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_loading.cpp"
   LIBRARIES ninfer_model_loading)
 
+# The DSpine load path (config parse + binding + tensor inventory) on a real V3-tailored
+# artifact. It reads the manifest only - no payload, no device memory - so it is serial-labelled
+# "real" rather than "gpu", and skips without NINFER_TEST_ARTIFACT.
+ninfer_add_test(ninfer_qwen3_5_dspine_real_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_real.cpp"
+  LIBRARIES ninfer_model_loading)
+set_tests_properties(ninfer_qwen3_5_dspine_real_test PROPERTIES
+  SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine")
+
 ninfer_add_test(ninfer_qwen3_5_runtime_mechanisms_test
   SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_runtime_mechanisms.cpp"
   LIBRARIES ninfer_engine ninfer_core)
