@@ -15,11 +15,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 - phase: **P0 (de-risk spike) — not started**
 - done: plan written; branch `feat/dspine-spec-backend` created
-- next: **P0a** port `dspine_bridge` ops to a worktree of prod base
-  `416-ebdc67e5`; **P0b** PyTorch bit-exact vectors vs
-  `Tencent/DSpine/dspine_mlx/.../reference.py`; **P0c** fleet gate
-  (`lane down a5000-11` → GPU-1 ≥ 35 GiB → `lane up a5000-2` → stock-target
-  probe). Kill-switch: P0b not bit-exact ⇒ STOP.
+- next: launch P0 fan-out (subagents do the bulk; main reads digests) —
+  **port-ops** (`dspine_bridge` → worktree of `416-ebdc67e5`) + **parity-ref**
+  (PyTorch bit-exact vectors vs `Tencent/DSpine/dspine_mlx/.../reference.py`)
+  parallel; **P0c** fleet gate after (`lane down a5000-11` → GPU-1 ≥35 GiB →
+  `lane up a5000-2` → stock-target accept probe, main-only lane ops).
+  Kill-switch: parity-ref not bit-exact ⇒ STOP.
 - open-risks: R5 upstream-drift, R3 Swift-1.5-tower acceptance (both P0-gated)
 - last-gate: — (none passed)
 
@@ -118,6 +119,43 @@ subagent concurrency = 1 (all ride basalt).
    lands on a committed, resumable state.
 6. **Keep STATUS small** (~15 lines); detail lives in the phase sections, read
    on demand. Do not use `recall` for load-bearing state — files are the source.
+
+## EXECUTION MODEL (context discipline)
+
+**Main agent = control plane.** Decision, gates, lane ops, STATUS updates,
+launching + reading digests, and the rare one-line inspection. It stays
+**nimble** — small context, rarely compacts, so the *decision* context never
+drifts. Main agent NEVER: reads bulk C++/CUDA/reference files, runs build/test
+loops, dumps large tool output, runs the bench, greps the tree.
+
+**Subagents = data plane.** Every context-heavy unit → subagent (own 262k, does
+the bulk, returns a digest). The heavy work burns *their* context; mine stays
+small.
+
+**Digest contract (the anti-compaction lever).** Subagents return:
+`DONE · FILES(file:line) · DECISIONS(why) · RESULT(num/green/red) ·
+NEXT · BLOBS(file paths, NOT content)`. NO raw logs/build output/file dumps.
+I read the digest + the STATUS/commit — never the bulk. BLOBS are pointers: the
+work lives in the worktree/commit, readable on demand.
+
+**Per-phase map:**
+
+| Subagent (role) | model | work | returns |
+|---|---|---|---|
+| **port-ops** | sonnet-5 (5090 idle) | port `dspine_bridge` to a worktree of `416-ebdc67e5`; patch drift; build | build green + drift notes + commit |
+| **parity-ref** | sonnet-5 | PyTorch reference, bit-exact vectors, test file | pass/fail + files |
+| **impl-<stage>** | sonnet-5 | exec path: load/forward/tail/accept (1 stage each) | diff + test green + decisions |
+| **test-runner** | sonnet-5 | build+test loop; fix; re-run | digest w/ final result |
+| **bench-runner** | sonnet-5 | run gate+A/B, parse jsonl | numbers + pass/fail |
+| **verifier** | opus-5 (basalt) | accept-math review | pass/fail + reasoning |
+
+**Rules.** Fan-out read-only; one writer per file; worktree isolation on code
+(squash-merge by me). Long loops (build, bench, test-iterate) = subagent —
+NEVER main. **If main reads >1k lines of bulk, it broke the contract.**
+
+**Main's loop:** `read STATUS → fan-out subagents (parallel, worktree) → read
+digests → commit (subagents commit worktree; I squash-merge) → update STATUS →
+gate (human)`. One read + N digests per phase — bounded main context.
 
 ## REFERENCES
 
