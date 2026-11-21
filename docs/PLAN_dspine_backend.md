@@ -974,6 +974,49 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   — HEAD moved mid-run again (docs-only, harmless, but it is the same hazard that
   poisoned a build dir).
 
+- **D-2026-11-21-45** — **SEAM EXECUTABLE (4 defects fixed); ACCEPTANCE STILL HAS NO
+  NUMBER, and the reason is structural, not a bug.** Merged `1d211bd9`. Fixes: (a)
+  `frames.cpp:265+` binds the five DSpine regions; (b) `startup.cpp:368` gained the
+  `plan.features.dspine()` arm (sizing the (K+1) verify block, the sparse-accept term,
+  every `dspine_propose_tail` arena allocation, the tower head's `slots×K` projections —
+  **never copied**, D-37) and `masked_draft()` became `} else if`; same family
+  `decode.cpp:232` taps (`dspine()?config.dspine->target_layer_ids:…`, i.e. **D-20's
+  `[1,16,31,46,61]`**) and `decode.cpp:31` now **throws loudly** (no DSpine context
+  append exists); (c) `graph_bodies.cpp:10+` **`initialize_graphs` throws "DSpine has no
+  graph profile; run eager"**** before building anything — chosen because
+  `bodies.draft`'s `else` **is** `run_dflash_draft`, so a captured DSpine round would
+  silently replay DFlash2's proposal path.
+  **DFlash2 surface = exactly 3 removed lines**, each provably no-op (the duplicate
+  include; the `features->layers` line now the ternary's **false** arm; `if
+  (masked_draft())` → `} else if (masked_draft())`). Suite **174 P / 9 F / 26 S of 209**
+  and the same 9 failures reproduce at **pre-fix `010ce9b3`** ⇒ all pre-existing.
+  **First RUNTIME net on the widened accept site**: `sampling` **549 cases / 0 skipped**,
+  sampling_defaults, sequence, sequence_parallel, decode_graph — **5/5 pass, 0 skips**.
+  Parity unmoved (tail K1+K2 4 cases; `idx`-vs-table **0/240 flips ×38**; candidate
+  stream **0/240 ×38**; T=0 ≡ greedy pair; alloc-free; identity 32/32).
+  `⚠` **WHY THERE IS STILL NO ACCEPTANCE NUMBER — two independent reasons, both
+  structural**: (1) **probe `#70` stops before its first byte** — 1 core 100 %, RSS
+  pinned 194.6 MiB, `minflt` pinned **12906** across two byte-identical runs,
+  **K-independent**, **0 % GPU**, unaffected by `NINFER_CUDA_SYNC=blocking`, inside
+  `Harness`'s member-init; `#71`/`#72` run the **identical**
+  `Reader`/`Device`/`DeviceContext` sequence on the **same artifact and card** in
+  0.17–0.29 s ⇒ manifest/card/driver/load **exonerated**, remaining variable = `#70`'s
+  unique link closure (`model_loading+ops+model_execution`), and ptrace is blocked so
+  the frame is out of reach without a rebuild. (2) **Even fixed, the probe cannot
+  answer the question**: on synthetic taps the prod filter leaves **1.000 of 16**
+  candidates per slot ⇒ **T=0.9 IS the T=0 arm** ("measures nothing about drafting
+  quality"), and the **target's** logits are what the accept op verifies — the probe
+  has no target. **D-42 stands, now re-confirmed on the fixed tree.**
+  `⚠` **CORRECTION to D-43(a)**: the "manifest parse of the 26.8 GiB artifact is slow"
+  does **not** transfer to the sizing artifact — `-nvfp4tables` loads in **0.29 s**
+  (`#71`) and **0.17 s** (`#72`). The slowness was the **fused 26.8 GiB** file. Do not
+  chase it again.
+  `⚠` **DSpine's engine decode loop is still not runnable**, for one named reason: **no
+  DSpine draft-context append** (the existing body reads `config.draft`/`parameters.draft`,
+  empty for a DSpine profile) **and the 5-layer walk is probe-only**. It now stops at a
+  **named throw** instead of a nullopt read. Also recorded: `run_dspine_draft` passes
+  `bridge_message` **unprefixed** (`ne[2]=batch_capacity`) ⇒ the seam is **batch-1 only**.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
