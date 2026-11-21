@@ -1044,6 +1044,24 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **named throw** instead of a nullopt read. Also recorded: `run_dspine_draft` passes
   `bridge_message` **unprefixed** (`ne[2]=batch_capacity`) ⇒ the seam is **batch-1 only**.
 
+- **D-2026-11-21-46** — **MERGE GATE GREEN on `1d211bd9` (the D-36 gate, executed as
+  written).** Fresh build dir (not the poisoned one): **2608 edges**, and the **second
+  `ninja` printed "no work to do"** — the check that catches "target never entered the
+  graph", which is the exact failure that bit at `c7d09a66`. **Registration sweep: 0
+  registered-but-unknown.** CPU suite: **90 selected tests actually EXECUTED → 83 pass /
+  7 fail**, the 7 being precisely the known python-dep set, **zero outside it** (the
+  remaining 82 of the 172 selected skip and are counted as passes by ctest — that caveat
+  is now in the record twice, D-44/D-46). **All 8 DSpine test targets compile**, proven by
+  a forced clean+rebuild. **The 3 removed source lines are verified behaviour-neutral for
+  DFlash2** line by line (duplicate include; the `features->layers` line now the
+  ternary's **false** arm; `if (masked_draft())` → `} else if (masked_draft())` with the
+  condition text unchanged).
+  **So `1d211bd9` is merge-safe and the D-36 gate procedure is now proven end-to-end
+  twice** (`b689e4e0`, `1d211bd9`). Standing caveat that must not be lost: the gate proves
+  compilation, registration and host-side logic — **DFlash2's RUNTIME remains unexercised**
+  in this build (all its engine tests skip without an artifact+device), which is D-21(b)
+  and is the A/B's denominator.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
