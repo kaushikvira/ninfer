@@ -72,12 +72,108 @@
 // gates, and every change on the DFlash2 path is `if (backend == Dspine)` additive.
 
 #include "core/arena.h"
+#include "models/qwen3_5/state/decoder_state.h"
 #include "models/qwen3_5/execution/parameters.h"
+#include "ninfer/ops/kv_cache_append.h"
 #include "ninfer/ops/sampling.h"
+#include "ninfer/ops/softmax_attention.h"
 
 #include <cstdint>
 
 namespace ninfer::models::qwen3_5::execution {
+
+// The drafter's execution view, the DSpine twin of `DraftExecutionView` (execution/draft.h:16-27).
+// The five draft layers are all full-context - the drafter declares no sliding window
+// (models/common/dspine/config.h:sliding_window is 0 in the shipped artifacts, and
+// planning/startup.cpp:113-120 gives it the paged half of the masked-draft state and no cyclic
+// local state at all) - so the view names one paged context and no cyclic one.
+struct DspineExecutionView {
+    const Parameters& parameters;
+    MemoryArena& work;
+    CudaExecutionView cuda;
+    const PagedKVCache* context = nullptr;   // the drafter's own paged context, five layers
+
+    [[nodiscard]] PagedKVBatchLayerView context_layer(std::uint32_t layer) const;
+};
+
+// THE DRAFT-CONTEXT APPEND - the DSpine arm of the decode loop's per-round context update
+// (program/decode.cpp:29, :45). It is the same half the DFlash2 path runs in
+// `append_context_impl` (execution/draft.cpp:41): the target-tap field the tower's feature sink
+// wrote is projected once (`feature_projection`), normed once (`context_norm`), and every one of
+// the drafter's five layers then projects that normed field into ITS OWN context key and value,
+// norms the key, RoPEs it at the append positions, and appends the pair to that layer's own paged
+// pages. Those pages are what `dspine_walk`'s per-layer context attention then reads, so the
+// append is the KV and position advance the masked-block drafter needs: the block's positions
+// start where the appended prefix ends.
+//
+// The context key and value are the K and V RANGES of the layer's packed Q/K/V object
+// (models/common/dspine/weights.cpp binds them with require_shared_binding), and this engine has
+// no NVFP4 linear compiled at their apart geometry (1024 x 5120) nor at the paired one the
+// DFlash2 path uses (2048 x 5120, linear_pair). The split family, which the drafter's own packed
+// parent reaches, is the one compiled route to those bytes: the projection is issued over the
+// parent and the Q rows it also computes are dropped into a scratch stream. At a 16-wide context
+// that is 4096 of 6144 output rows thrown away - a measured cost of the missing context geometry,
+// recorded, not hidden behind a new kernel (the probe's own words, test_dspine_forward_real.cpp).
+//
+// `features` is the packed target-tap field [hidden * taps, width, batch], `positions`/`counts`
+// the append positions and counts the loop derives with `prepare_ragged_prefix`, and
+// `table_rows` the drafter paged context's row per batch lane.
+void dspine_append_context(DspineExecutionView view, const Tensor& features,
+                           const Tensor& positions, const Tensor& counts, const Tensor& table_rows,
+                           ops::KVCacheAppendPrefixExecutionEnvelope envelope);
+
+// THE FIVE-LAYER WALK - the drafter's proposal stack, from the mask block to the streams the
+// proposal tail consumes. Ported step for step from the probe that walks it on the real weights
+// (tests/models/qwen3_5/test_dspine_forward_real.cpp: run_forward and run_bridge), so the probe
+// stays the parity harness for it and no second dialect of the mathematics exists.
+//
+//   block arrangement   ops::prepare_masked_block (the mask token in the draft positions)
+//   embedding           the tower's own token embedding
+//   five layers         { input norm (taken from the previous layer's fused write where there
+//                        was one), split Q/K/V over the packed parent, query and key head norms
+//                        then RoPE, paged context attention over the layer's own pages, the
+//                        attention output projection plus the residual, the post-attention norm,
+//                        the SwiGLU pair, the down projection into the residual }
+//   after each layer    the seven-step code bridge { prepare_read, the code projection, the
+//                        normalize_codes over the real codebook, the gate / predecessor / value
+//                        projections into the packed block, the message, the write projection,
+//                        the finish that refines the residual in place and fuses the next
+//                        layer's input norm }
+//
+// The LAST layer's fused write is the tail's input: its `stash` (the pre-refinement residual),
+// its `rms` (the per-column read scale) and its `message` (the packed Q) are exactly
+// `dspine_serial_scores`' raw / rms / packed_q, and its normed block is the proposal hidden the
+// tower's head scores. `dspine_propose_tail` takes those streams from here.
+//
+// ROUND RESET (D-42). The walk opens the way the engine's own masked-draft round does,
+// `propose_batch_impl`'s `execution.work.reset()` (execution/draft.cpp:347): every transient it
+// uses is arena storage the reset rewinds, the residual stream is re-derived from
+// `prepare_masked_block` + `embedding` and never carried in, and the streams the round writes
+// only IN PART are zeroed by `dspine_propose_tail`'s own round zero (its proposal distribution is
+// written per walked sender row, dspine_serial_tail.cpp:258-268). That is what makes a round a
+// pure function of its inputs - `0 of 37 streams part` over 32 rounds in D-42's probe - and on
+// the decode path it is what keeps round N+1 from reading round N's partial planes, arrival
+// counters, quantizer bounds, or sender rows. The drafter's five pages are NOT part of that zero:
+// they are the sequence's history, advanced by `dspine_append_context`, and zeroing them would
+// erase the context the round attends over.
+struct DspineWalkInputs {
+    Tensor anchors;         // [batch] I32 - each row's anchor token
+    Tensor frontiers;       // [batch] I32 - the appended context length per row
+    Tensor valid_columns;   // [batch] I32
+    Tensor table_rows;      // [batch] I32 - the drafter context's page-table row per lane
+};
+
+struct DspineWalkOutputs {
+    Tensor ids;            // [width, batch] I32 - the mask block, the anchor column plus the drafts
+    Tensor positions;      // [width, batch] I32 - the block's draft positions
+    Tensor bridge_raw;     // [hidden, width, batch] BF16 - the last write's stash
+    Tensor bridge_rms;     // [width * batch] FP32       - the last write's read scale
+    Tensor bridge_message; // [rank, width, batch] BF16  - the last write's packed message
+    Tensor proposal_hidden;// [hidden, width, batch] BF16 - the last write's normed block
+};
+
+void dspine_walk(DspineExecutionView view, const DspineWalkInputs& inputs,
+                 DspineWalkOutputs& outputs, ops::ContextAttentionExecutionEnvelope envelope);
 
 // The proposal tail's inputs: the streams the draft layers' LAST fused bridge write leaves
 // behind, at the shapes `dspine_serial_scores` names them by. `stash` is the pre-refinement

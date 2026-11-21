@@ -11,13 +11,27 @@
 
 #include "models/qwen3_5/execution/dspine.h"
 
+#include "models/common/dspine/config.h"
 #include "models/common/dspine/dspine_serial_tail.h"
+#include "models/qwen3_5/execution/linear.h"
 #include "models/qwen3_5/planning.h"
 #include "ninfer/ops/dspine_bridge.h"
+#include "ninfer/ops/embedding.h"
+#include "ninfer/ops/kv_cache_append.h"
+#include "ninfer/ops/linear.h"
+#include "ninfer/ops/linear_add.h"
+#include "ninfer/ops/linear_split.h"
+#include "ninfer/ops/linear_swiglu.h"
 #include "ninfer/ops/linear_topk.h"
+#include "ninfer/ops/residual_add.h"
+#include "ninfer/ops/rmsnorm.h"
+#include "ninfer/ops/rope.h"
+#include "ninfer/ops/sequence.h"
 
 #include <cuda_runtime.h>
 
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -188,6 +202,17 @@ void dspine_propose_tail(const DspineTailView& view, const DspineTailInputs& inp
     auto tail_drafts     = work.alloc(DType::I32, {batch, drafts});
     auto tail_q          = work.alloc(DType::FP32, {batch, drafts, slots});
     auto tail_index      = work.alloc(DType::I32, {batch, drafts, slots});
+    // The round zero (D-42). `dspine_serial_tail` writes ONLY the sender row its walk reaches
+    // per slot - src/models/common/dspine/dspine_serial_tail.cpp:258-268 - so the other
+    // `slots - 1` rows of every slot are whatever this arena slot held. Step 5 reads the WHOLE
+    // grid back and publishes all of it as the accept op's `proposal_q`, so without this the
+    // round would publish the previous round's sender rows: a round would not be a function of
+    // its inputs, which is the property D-42 proved over 32 rounds (`0 of 37 streams part`) and
+    // the property that makes repeated decode rounds correct. The probe gets this by zeroing
+    // the stream in its `reset_round`; this is the round's own copy of that zero, and the only
+    // stream of the tail that needs it (the table, the candidate rows and the index are written
+    // whole by steps 2 to 4).
+    CUDA_CHECK(cudaMemsetAsync(tail_q.data, 0, tail_q.bytes(), cuda.stream()));
     {
         std::vector<std::int32_t> head_words;
         head_words.resize(grid_words);
@@ -225,6 +250,324 @@ void dspine_propose_tail(const DspineTailView& view, const DspineTailInputs& inp
                     tail_ids[std::size_t(row) + std::int64_t(batch) * std::int64_t(slot)];
         settle_to_device(outputs.drafts.data, accept_ids, cuda, "drafts");
     }
+    (void)scope;
+}
+
+namespace {
+
+// The drafter geometry, read out of the profile the plan was built from. Every dimension the
+// walk names comes from the DSpine component - NOT from the tower's - the same rule the target
+// tap list follows in program/decode.cpp:232 (D-20's taps are [1,16,31,46,61], not prod's).
+struct WalkGeometry {
+    std::int32_t hidden, taps, code, rank, intermediate, head_dim, query_heads, key_value_heads;
+    std::int32_t query, key;
+    float rms_norm_eps, rope_theta, bridge_eps;
+};
+
+[[nodiscard]] const models::dspine::Config& drafter(const Parameters& parameters) {
+    if (!parameters.profile->config.dspine)
+        throw std::logic_error("dspine draft: the model profile carries no dspine drafter");
+    return *parameters.profile->config.dspine;
+}
+
+[[nodiscard]] const DspineParameters& drafter_parameters(const Parameters& parameters) {
+    if (!parameters.dspine)
+        throw std::logic_error("dspine draft: the model carries no dspine drafter");
+    if (parameters.dspine->layers.empty())
+        throw std::logic_error("dspine draft: the drafter carries no draft layers");
+    return *parameters.dspine;
+}
+
+[[nodiscard]] WalkGeometry walk_geometry(const Parameters& parameters) {
+    const auto& draft = drafter(parameters);
+    return WalkGeometry{dimension(draft.hidden_size),
+                         dimension(draft.target_layer_ids.size()),
+                         dimension(draft.bridge.code_size),
+                         dimension(draft.bridge.rank),
+                         dimension(draft.intermediate_size),
+                         dimension(draft.head_dim),
+                         dimension(draft.num_attention_heads),
+                         dimension(draft.num_key_value_heads),
+                         dimension(draft.query_width()),
+                         dimension(draft.key_width()),
+                         draft.rms_norm_eps,
+                         draft.rope_theta,
+                         draft.bridge.eps};
+}
+
+[[nodiscard]] std::int32_t columns_of(const Tensor& stream, const char* what) {
+    if (!stream.data || stream.ne[0] <= 0 || stream.ne[1] <= 0)
+        throw std::invalid_argument(std::string("dspine draft: ") + what + " is unavailable");
+    return stream.ne[1];
+}
+
+} // namespace
+
+PagedKVBatchLayerView DspineExecutionView::context_layer(std::uint32_t layer) const {
+    if (!context) throw std::logic_error("dspine draft: the drafter has no paged context");
+    return context->batch_layer_view(layer);
+}
+
+// The DSpine draft-context append: the half of the drafter's per-round context update that the
+// DFlash2 path runs in `append_context_impl` (execution/draft.cpp:41). The steps are the ones
+// `test_dspine_forward_real.cpp` labels "feature projection of the target taps", "context norm"
+// and "context key/value projections, key norm, RoPE, append to layer N's pages" - in that order,
+// on the same ops, with the packed-parent split for the context key and value.
+void dspine_append_context(DspineExecutionView view, const Tensor& features,
+                           const Tensor& positions, const Tensor& counts,
+                           const Tensor& table_rows,
+                           ops::KVCacheAppendPrefixExecutionEnvelope envelope) {
+    const auto& draft   = drafter(view.parameters);
+    const auto& weights = drafter_parameters(view.parameters);
+    const auto shape    = walk_geometry(view.parameters);
+    if (!features.data || !positions.data || !counts.data || !table_rows.data)
+        throw std::invalid_argument("dspine draft context: an input is unavailable");
+    const auto width  = columns_of(features, "the target-tap field");
+    const auto batch  = features.ne[2];
+    const auto rows   = features.ne[0];
+    if (rows != shape.hidden * shape.taps || batch < 1 ||
+        positions.ne[0] != width || positions.ne[1] != batch || counts.ne[0] != batch ||
+        table_rows.ne[0] != batch || features.dtype != DType::BF16)
+        throw std::invalid_argument("dspine draft context: the round geometry is out of range");
+    if (std::uint64_t(draft.num_hidden_layers) != weights.layers.size())
+        throw std::logic_error("dspine draft context: the drafter's layers and its profile part");
+
+    const auto columns = width * batch;
+    auto scope         = view.work.scope();
+    auto projected     = view.work.alloc(DType::BF16, {shape.hidden, columns});
+    auto context       = view.work.alloc(DType::BF16, {shape.hidden, columns});
+    project(features.view({rows, columns}), weights.feature_projection, projected, view.work,
+            view.cuda);
+    ops::rmsnorm(projected, weights.context_norm, shape.rms_norm_eps, false, context, view.cuda);
+
+    // Every draft layer projects the SAME normed target features with ITS OWN context key and
+    // value, and those are the K and V ranges of the layer's packed Q/K/V object. The split
+    // family is the one compiled route to them (see dspine.h), and the Q rows it also computes
+    // land in a scratch stream and are dropped: a measured cost of the missing context geometry,
+    // the same one the probe records at its own "context key/value projections" step.
+    for (std::size_t layer = 0; layer < weights.layers.size(); ++layer) {
+        auto layer_scope = view.work.scope();
+        const auto& block = weights.layers[layer];
+        auto key_raw = view.work.alloc(DType::BF16, {shape.key, columns});
+        auto value   = view.work.alloc(DType::BF16, {shape.key, columns});
+        auto query_scratch = view.work.alloc(DType::BF16, {shape.query, columns});
+        const std::array streams{query_scratch, key_raw, value};
+        ops::linear_split(context, block.query_key_value.weight, streams, view.cuda);
+        auto key = view.work.alloc(DType::BF16, {shape.key, columns});
+        ops::rmsnorm(key_raw, block.key_norm, shape.rms_norm_eps, false, key, view.cuda);
+        ops::rope(positions.view({columns}), shape.head_dim, shape.rope_theta, key, view.cuda);
+        ops::kv_cache_append_prefix(
+            key.view({shape.head_dim, shape.key_value_heads, width, batch}),
+            value.view({shape.head_dim, shape.key_value_heads, width, batch}),
+            positions, counts, table_rows, envelope, view.context_layer(std::uint32_t(layer)),
+            view.cuda);
+    }
+}
+
+namespace {
+
+// One layer's code bridge, the seven steps the probe runs as `run_bridge`, in its order:
+// the read (rms of the layer stream), the code projection, normalize_codes over the real
+// codebook (the anchor column's row is the codebook's anchor row), the gate, predecessor and
+// value projections of the codes into ONE packed [3R, width, batch] block, the message, the
+// write projection, and the finish that refines the residual IN PLACE and fuses the next
+// layer's input norm. `stash` is the pre-refinement residual the serial tail reads, and only
+// the LAST layer's stash, rms and message leave the walk.
+struct BridgeStreams {
+    Tensor normalized, rms, codes, codes_out, packed, message, delta;
+    // The write's fused-norm outputs, which the NEXT layer reads as its input norm and the
+    // last layer's turn publishes to the tail: `normed` is the proposal hidden and `stash` is
+    // the tail's raw stream. `anchors` and `width` are normalize_codes' anchor-column rule.
+    Tensor normed, stash, anchors;
+    std::int32_t width = 0;
+};
+
+void dspine_bridge(DspineExecutionView view, BridgeStreams& streams, Tensor& residual,
+                   const WalkGeometry& shape, std::size_t layer, bool last) {
+    const auto& weights = drafter_parameters(view.parameters);
+    const auto& bridge  = weights.bridge;
+    if (layer >= bridge.read.size() || layer >= bridge.write.size())
+        throw std::logic_error("dspine draft: the bridge is missing a layer's read or write");
+    const auto columns = residual.ne[0] * residual.ne[1];
+    auto codes_in   = streams.codes.view({shape.code, columns});
+    auto codes_out  = streams.codes_out.view({shape.code, columns});
+    auto codes_post = streams.codes.view({shape.code, columns});
+    auto delta      = streams.delta.view({shape.hidden, columns});
+    auto normed     = streams.normed.view({shape.hidden, columns});
+    auto stash      = streams.stash.view({shape.hidden, columns});
+    auto message    = streams.message.view({shape.rank, columns});
+    // The read: rms of the layer stream, the scale `dspine_finish` and `dspine_serial_scores`
+    // both read back.
+    ops::dspine_prepare_read(residual, shape.bridge_eps, streams.normalized, streams.rms,
+                              view.cuda.stream());
+    // The code projection, then normalize_codes over the real codebook - whose anchor column
+    // (t = 0) is the codebook's row for the row's anchor token.
+    // The per-layer read and write are the Weight forms: one row range of the bridge's stacked
+    // object, issued with the drafter's own policy rather than a prepared projection's.
+    ops::linear(codes_in, bridge.read[layer], codes_out, ops::LinearPolicy::A16Only, view.work,
+                view.cuda);
+    ops::dspine_normalize_codes(codes_out, streams.anchors, bridge.codebook, streams.width,
+                                shape.bridge_eps, codes_post, view.cuda.stream());
+    // The gate, the predecessor gate and the value projection of the codes, into ONE packed
+    // [3R, columns] block - the three R-row slices of one arena allocation.
+    {
+        const auto plane = std::size_t(std::int64_t(shape.rank) * columns) * 2;
+        const auto base  = static_cast<std::byte*>(streams.packed.data);
+        auto gate = Tensor(base, view.cuda.device(), DType::BF16, {shape.rank, columns, 1, 1});
+        auto predecessor =
+            Tensor(base + plane, view.cuda.device(), DType::BF16, {shape.rank, columns, 1, 1});
+        auto previous =
+            Tensor(base + 2 * plane, view.cuda.device(), DType::BF16, {shape.rank, columns, 1, 1});
+        project(codes_post, bridge.gate, gate, view.work, view.cuda);
+        project(codes_post, bridge.predecessor_gate, predecessor, view.work, view.cuda);
+        project(codes_post, bridge.prev, previous, view.work, view.cuda);
+    }
+    ops::dspine_message(streams.packed, bridge.gate_bias, message, view.cuda.stream());
+    // The write projection, and the finish: it refines the residual IN PLACE (that is why the
+    // walk hands the bridge the residual by reference) and fuses the NEXT layer's input norm,
+    // which is why the next layer's input norm is taken from the write and not recomputed.
+    ops::linear(message, bridge.write[layer], delta, ops::LinearPolicy::A16Only, view.work,
+                view.cuda);
+    const auto& next = last ? weights.final_norm : weights.layers[layer + 1].input_norm;
+    ops::dspine_finish(residual, streams.rms, delta, next, shape.rms_norm_eps, normed, &stash,
+                       view.cuda.stream());
+}
+} // namespace
+
+// The five-layer walk. Step-for-step this is `run_forward` from the probe, with the context
+// half lifted out into `dspine_append_context` (the engine runs the drafter's context once per
+// round on the ACCEPTED columns, not once per round inside the block), and the head, score
+// table and sampled tail left in `dspine_propose_tail`, which already owned them.
+void dspine_walk(DspineExecutionView view, const DspineWalkInputs& inputs,
+                 DspineWalkOutputs& outputs, ops::ContextAttentionExecutionEnvelope envelope) {
+    const auto& weights = drafter_parameters(view.parameters);
+    const auto& draft   = drafter(view.parameters);
+    const auto shape    = walk_geometry(view.parameters);
+    if (!inputs.anchors.data || !inputs.frontiers.data || !inputs.valid_columns.data ||
+        !inputs.table_rows.data || !outputs.ids.data || !outputs.positions.data ||
+        !outputs.bridge_raw.data || !outputs.bridge_rms.data || !outputs.bridge_message.data ||
+        !outputs.proposal_hidden.data)
+        throw std::invalid_argument("dspine draft: an input is unavailable");
+    const auto batch  = inputs.anchors.ne[0];
+    const auto width  = outputs.ids.ne[0];
+    const auto drafts = width - 1;
+    if (batch < 1 || width < 2 || std::uint32_t(drafts) > kDFlashDecodeMaximumDrafts ||
+        std::uint64_t(width) != draft.block_size ||
+        std::uint64_t(weights.layers.size()) != draft.num_hidden_layers ||
+        outputs.ids.ne[1] != batch || outputs.positions.ne[0] != width ||
+        outputs.positions.ne[1] != batch || outputs.proposal_hidden.ne[0] != shape.hidden ||
+        outputs.proposal_hidden.ne[1] != width || outputs.proposal_hidden.ne[2] != batch ||
+        outputs.bridge_raw.ne[0] != shape.hidden || outputs.bridge_raw.ne[1] != width ||
+        outputs.bridge_raw.ne[2] != batch ||
+        outputs.bridge_rms.ne[0] != width * batch ||
+        outputs.bridge_message.ne[0] != shape.rank || outputs.bridge_message.ne[1] != width ||
+        outputs.bridge_message.ne[2] != batch)
+        throw std::invalid_argument("dspine draft: the round geometry is out of range");
+    if (!view.context)
+        throw std::logic_error("dspine draft: the drafter has no paged context to attend over");
+
+    const auto columns = width * batch;
+    // The round reset: the arena the walk's transients live in is rewound, exactly as the
+    // engine's own masked-draft round opens (execution/draft.cpp:347). See dspine.h for what is
+    // and is not part of it.
+    view.work.reset();
+    auto scope = view.work.scope();
+
+    auto residual = view.work.alloc(DType::BF16, {shape.hidden, columns});
+    ops::prepare_masked_block(inputs.anchors, inputs.frontiers, inputs.valid_columns,
+                               dimension(draft.mask_token_id), outputs.ids, outputs.positions,
+                               view.cuda);
+    ops::embedding(outputs.ids.view({columns}), weights.token_embedding, residual, view.cuda);
+
+    // The streams the layers share, allocated once for the round out of the round's own arena.
+    auto hidden       = view.work.alloc(DType::BF16, {shape.hidden, columns});
+    auto projected    = view.work.alloc(DType::BF16, {shape.hidden, columns});
+    auto intermediate = view.work.alloc(DType::BF16, {shape.intermediate, columns});
+    auto query_raw    = view.work.alloc(DType::BF16, {shape.query, columns});
+    auto key_raw      = view.work.alloc(DType::BF16, {shape.key, columns});
+    auto value        = view.work.alloc(DType::BF16, {shape.key, columns});
+    auto query        = view.work.alloc(DType::BF16, {shape.query, columns});
+    auto key          = view.work.alloc(DType::BF16, {shape.key, columns});
+    auto attended     = view.work.alloc(DType::BF16, {shape.query, columns});
+    BridgeStreams bridge{
+        view.work.alloc(DType::BF16, {shape.hidden, columns}),   // normalized
+        view.work.alloc(DType::FP32, {columns}),                 // rms
+        view.work.alloc(DType::BF16, {shape.code, columns}),     // codes
+        view.work.alloc(DType::BF16, {shape.code, columns}),     // codes_out
+        view.work.alloc(DType::BF16, {3 * shape.rank, columns}), // packed
+        view.work.alloc(DType::BF16, {shape.rank, columns}),     // message
+        view.work.alloc(DType::BF16, {shape.hidden, columns})};  // delta
+    bridge.anchors = inputs.anchors;
+    bridge.width   = width;
+    auto normed = view.work.alloc(DType::BF16, {shape.hidden, columns});
+    auto stash  = view.work.alloc(DType::BF16, {shape.hidden, columns});
+    bridge.normed = normed;
+    bridge.stash  = stash;
+
+    const ops::AttentionHeadGeometry geometry{shape.head_dim, shape.query_heads,
+                                              shape.key_value_heads};
+    const auto scale = float(1.0 / std::sqrt(double(shape.head_dim)));
+
+    // The bridge of the previous layer hands the next layer a stream that is ALREADY normed
+    // (its write fuses that norm), so the input norm runs only where the write did not.
+    bool pre_normed = false;
+    for (std::size_t layer = 0; layer < weights.layers.size(); ++layer) {
+        auto layer_scope = view.work.scope();
+        const auto& block = weights.layers[layer];
+        if (pre_normed) {
+            CUDA_CHECK(cudaMemcpyAsync(hidden.data, normed.data, hidden.bytes(),
+                                       cudaMemcpyDeviceToDevice, view.cuda.stream()));
+        } else {
+            ops::rmsnorm(residual, block.input_norm, shape.rms_norm_eps, false, hidden,
+                         view.cuda);
+        }
+        {
+            const std::array streams{query_raw, key_raw, value};
+            ops::linear_split(hidden, block.query_key_value.weight, streams, view.cuda);
+        }
+        ops::rmsnorm(query_raw, block.query_norm, shape.rms_norm_eps, false, query, view.cuda);
+        ops::rmsnorm(key_raw, block.key_norm, shape.rms_norm_eps, false, key, view.cuda);
+        ops::rope(outputs.positions.view({columns}), shape.head_dim, shape.rope_theta, query, key,
+                  view.cuda);
+        ops::context_softmax_attention(
+            query.view({shape.head_dim, shape.query_heads, width, batch}),
+            key.view({shape.head_dim, shape.key_value_heads, width, batch}),
+            value.view({shape.head_dim, shape.key_value_heads, width, batch}), inputs.frontiers,
+            inputs.valid_columns, inputs.table_rows, geometry, scale,
+            ConstPagedKVBatchLayerView(view.context_layer(std::uint32_t(layer))), envelope,
+            view.work, attended, view.cuda);
+        // The attention output projection is [hidden, query_width], and this engine's linear_add
+        // carries its own shape table, which has not that geometry - so the residual add is
+        // taken as its own op. Same math as the DFlash2 path's `project_add`, one launch apart,
+        // and the probe records the geometry gap at the same step rather than behind a new
+        // kernel.
+        project(attended, block.output, projected, view.work, view.cuda);
+        ops::residual_add(projected, residual, view.cuda);
+        ops::rmsnorm(residual, block.post_attention_norm, shape.rms_norm_eps, false, hidden,
+                      view.cuda);
+        project_swiglu(hidden, block.mlp.gate_up, intermediate, view.work, view.cuda);
+        project_add(intermediate, block.mlp.down, residual, view.work, view.cuda);
+        dspine_bridge(view, bridge, residual, shape, layer,
+                      layer + 1 == weights.layers.size());
+        pre_normed = true;
+    }
+
+    // The last fused write is the tail's input. Its stash is the tail's `raw`, its rms the
+    // tail's read scale, its message the tail's packed Q, and its normed block the proposal
+    // hidden the tower's head scores - published into the frame's own streams, which is where
+    // `dspine_propose_tail` reads them from.
+    CUDA_CHECK(cudaMemcpyAsync(outputs.proposal_hidden.data, normed.data,
+                               std::size_t(std::int64_t(shape.hidden) * columns) * 2,
+                               cudaMemcpyDeviceToDevice, view.cuda.stream()));
+    CUDA_CHECK(cudaMemcpyAsync(outputs.bridge_raw.data, stash.data,
+                               std::size_t(std::int64_t(shape.hidden) * columns) * 2,
+                               cudaMemcpyDeviceToDevice, view.cuda.stream()));
+    CUDA_CHECK(cudaMemcpyAsync(outputs.bridge_rms.data, bridge.rms.data,
+                               std::size_t(std::int64_t(columns)) * 4, cudaMemcpyDeviceToDevice,
+                               view.cuda.stream()));
+    CUDA_CHECK(cudaMemcpyAsync(outputs.bridge_message.data, bridge.message.data,
+                               std::size_t(std::int64_t(shape.rank) * columns) * 2,
+                               cudaMemcpyDeviceToDevice, view.cuda.stream()));
     (void)scope;
 }
 
