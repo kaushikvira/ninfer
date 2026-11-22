@@ -1232,6 +1232,32 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   established** (synthetic activations saturate, D-39 red 3) ⇒ needs the **real-prefill
   fixture** · ⑤⬜ acceptance vs 2.998 — needs the lane.
 
+- **D-2026-11-21-52** — **D-36 GATE GREEN on the merged tree — and it invalidated a premise I
+  had been planning around.** Gate `mwr3uede-7fb4` on the tree at `4994d0d2`: **2620-edge
+  build, 0 errors, second `ninja` "no work to do"**, **0 registered-but-unknown**,
+  CPU suite **90 executed → 83 pass / 7 known-fail / 82 skips** (net identical to the
+  python-dep baseline), **10/10 DSpine targets recompile** from a forced clean, and the
+  **shared file's 29 removed `src/` lines are all inside DSpine gates** ⇒ inert for DFlash2
+  by construction.
+  `⚠` **Framing correction accepted**: `4994d0d2` is my **docs-only single-parent commit**,
+  not the merge — the verified content came from **`f7909ae7` + `77aabb2d`**. The verdict
+  transfers (the sha is a descendant), but the attribution in my last report was wrong and
+  is corrected here.
+  `⚠` **THE INVALIDATED PREMISE — this is the important part**: I had been telling the user
+  that criterion ⑤ **needs a lane** because "the drafter cannot co-reside with the target
+  tower on GPU 1". **D-51's fidelity probe disproved it**: it loaded the **executor's own
+  shard — 712 objects, 20.43905 GiB — on GPU 1** (`device free 25113 → 4183 MiB`), i.e.
+  **tower AND drafter resident**, then walked 32 rounds bit-exact. **The artifact carries
+  both.** So a **real round can be verified against the real target on GPU 1, with no lane,
+  no prod downtime and no image build.** In flight `mwr4mnsg-83a1`: N≥8 rounds, T=0.9 +
+  T=0 arms, drafts verified by the engine's real accept op against the target's own logits,
+  reported on **prod's definition (accepted + 1)** so it compares directly to **2.998** and
+  the **3.25 break-even**. Constraints stated to it: ~4.2 GiB left for KV/graphs/scratch
+  after the 20.44 GiB shard ⇒ short prompt; **if it does not fit, report the exact GiB
+  shortfall** (that is a real lane-sizing finding); and **suspect the harness first** if
+  acceptance looks absurd (>10 or <1), because a self-referential draft is the classic
+  failure (D-42).
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
