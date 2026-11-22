@@ -1258,6 +1258,59 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   acceptance looks absurd (>10 or <1), because a self-referential draft is the classic
   failure (D-42).
 
+- **D-2026-11-21-53** — `⚠` **THE FIRST REAL ACCEPTANCE NUMBER: DSpine = 0.85 accepted/round
+  vs DFlash2's 1.68 (same card, prompts, policy, verifier) — DSpine is ~0.47×, and the
+  wide window does NOT pay.** `mwr4mnsg-83a1` ran the full engine route (tower + DSpine
+  drafter + KV + frame) on **GPU 1, no lane**, because **D-52's premise was right**: the
+  artifact carries **both drafters**, so the control exists in the same binary.
+  | backend | K | arm | acc/round | prod-def | ms/round | N | p0 | depth |
+  |---|---|---|---|---|---|---|---|---|
+  | DFlash2 | 7 | T=0.9 | 1.6809 | 2.6809 | 25.47 | 94 | .72 | p6 |
+  | DFlash2 | 15 | T=0.9 | **1.7802** | 2.7802 | 27.40 | 273 | .70 | p9 |
+  | DFlash2 | 15 | T=0 | 2.2308 | 3.2308 | 27.35 | 117 | .67 | p11 |
+  | **DSpine** | **15** | **T=0.9** | **0.8467** | **1.8467** | 27.60 | 411 | .55 | p5 |
+  | **DSpine** | **15** | **T=0** | 0.7746 | 1.7746 | 27.46 | 213 | .45 | p5 |
+  **Calibration**: DFlash2 K=7 in-harness reads 1.6809 = **0.5607 × prod's 2.998** ⇒ the
+  harness under-reads ~1.8×; on that scale **DFlash2 K=15 ≈ 3.18** (AT the 3.250
+  break-even) and **DSpine K=15 ≈ 1.51**. **Same round cost** (27.60 vs 27.40 ms) ⇒ **the
+  loss is acceptance, not speed — D-48's cost finding stands, it just doesn't matter.**
+  Round range 0…5, histogram `0:186 1:150 2:48 3:12 4:9 5:6` ⇒ **45 % of rounds accept
+  nothing**. Per-position it is **lower at p0 (.55 vs .70) and steeper** — dead at p5 where
+  DFlash2 reaches p9.
+  `⚠` **WHY THIS IS A LOWER BOUND, NOT A VERDICT (the one thing that stops a shelve)**:
+  a context-sensitivity tooth (`NINFER_AB_PROMPT`) re-ran every arm on a **316-token**
+  prompt — **DFlash2 1.78 → 1.52 (−15 %)**, **DSpine 0.85 → 0.22 (−74 %)**, p0 .55 → .17.
+  **A drafter whose drafts get worse as context grows is the signature of a context feed
+  that is not landing**, and the three context arms (`execution.cpp` prefill,
+  `draft_commit.cpp` commit, `startup.cpp` local-state) are **new, unreviewed code written
+  to make the measurement run at all**. Bounded check in flight: is the context feed
+  correct? If it is, **DSpine K=15 is shelved on evidence**; if it is not, 0.85 is invalid
+  and the real number is unknown.
+  `⚠` **What `--spec dspine` needed to run end-to-end (three named gates, all DSpine-only,
+  DFlash2 bytes identical)**: (1) `startup.cpp:96-115` named the drafter's local state with
+  `.layers = 0U` ⇒ `plan_cyclic_kv_cache` refused (**"Cyclic KV geometry is invalid"**)
+  though its own comment claims DSpine "takes no cyclic local state" — `DFlashPersistentState::local`
+  is a **reference** (`resources.h:77`) that `resources.cpp:140` requires; fixed by naming
+  the 5 layers, **cost: 167.6 MiB/Context of a cache a DSpine round never touches**;
+  (2) `program/execution.cpp` prefill and (3) `program/draft_commit.cpp` commit both call
+  `draft_append_context`, whose body reads `parameters.draft`/`config.draft` (empty here,
+  `execution/draft.cpp:513`) ⇒ **"draft parameters are unavailable"** at the first prefill;
+  each now arms `dspine_append_context` (sibling of the decode arm at `decode.cpp:70-82`).
+  Plus `state/state_image.cpp` gates the cyclic plan on `layers > 0`.
+  **D-21(b) partly discharged**: DFlash2's *runtime* — the prefill/commit code touched —
+  ran green on a real V3 tower (its K=7 and K=15 rows above).
+  `⚠` **Reviewed concern carried forward**: those four production gates are the **first code
+  on the DSpine serving path written to make a measurement run** rather than derived from a
+  spec; they are enough to run a round and prove DFlash2 inert, and the **167.6 MiB phantom
+  cache** is standing evidence that the shared masked-draft struct is the **wrong shape**
+  for this backend.
+  **Geometry note**: K<15 is **structurally refused** (`dspine_walk:474` requires
+  `width == block_size = 16`) ⇒ the shipped window is the only window, so the K=15
+  comparison **is** the whole comparison. The prod lane geometry does **not** fit this card
+  (`dflash2_real_test` at batch 8 / 2304 ctx / graphs stops at "Device budget cannot hold
+  model weights and required execution resources"). Full engine route costs **23.97266 GiB**,
+  free 25115 → **567 MiB**.
+
 ## OBJECTIVE
 
 DSpine parallel drafter (Tencent, Apache-2.0, arXiv 2609.36173) as a NInfer
