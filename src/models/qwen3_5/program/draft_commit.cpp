@@ -1,6 +1,7 @@
 #include "models/qwen3_5/program/internal.h"
 
 #include "models/qwen3_5/execution/draft.h"
+#include "models/qwen3_5/execution/dspine.h"
 #include "ninfer/ops/sequence.h"
 
 #include <algorithm>
@@ -34,6 +35,19 @@ void RankProgramImpl::commit_draft_history(ComputeOperation& operation) {
                                frame.draft_append_starts.slice(0, 0, batch),
                                frame.draft_append_ends.slice(0, 0, batch), features, positions,
                                counts, cuda);
+    // The commit half of the drafter's context update, the same pair of arms as the prefill half
+    // (execution.cpp:74-104) and the decode half (decode.cpp:70-82). `draft_append_context` reads
+    // `parameters.draft`, empty for a DSpine profile, so a DSpine round stops at its first commit.
+    if (backend == SpeculativeBackend::Dspine) {
+        if (!state.full) {
+            throw std::logic_error("DSpine draft context: the drafter has no paged context");
+        }
+        execution::dspine_append_context(
+            execution::DspineExecutionView{parameters, resources.work, cuda, &*state.full},
+            features, positions, counts, frame.backend_table_rows.slice(0, 0, batch),
+            {0, maximum});
+        return;
+    }
     execution::draft_append_context({parameters, resources.work, cuda, state.local,
                                      state.full ? &*state.full : nullptr, proposal_head},
                                     features, positions, counts,

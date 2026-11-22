@@ -174,7 +174,7 @@ RequestOptions request_for(const Arm& arm) {
     return request;
 }
 
-void run(Engine& engine, const Arm& arm, Measure& out) {
+void run(Engine& engine, const Arm& arm, Measure& out, SpeculativeBackend route) {
     const auto prompt = engine.tokenize_text(arm.prompt);
     for (std::int32_t index = 0; index < setting_integer("NINFER_AB_RUNS", 3); ++index) {
         const auto began  = std::chrono::steady_clock::now();
@@ -186,8 +186,8 @@ void run(Engine& engine, const Arm& arm, Measure& out) {
         // A request's SpeculativeStats are request-owned counters that start at zero
         // (session/binding.cpp:196-198, accumulated per commit in session/commit.cpp:294-308), so
         // the result is this request's own delta: no engine-wide subtraction, no shared state.
-        if (!spec.enabled || spec.backend != SpeculativeBackend::Dspine) {
-            stop("the request did not run on the DSpine backend");
+        if (!spec.enabled || spec.backend != route) {
+            stop("the request did not run on the named backend");
         }
         if (spec.draft_window != arm.outputs && spec.draft_window == 0) {
             stop("the DSpine round published no draft window");
@@ -216,9 +216,9 @@ void run(Engine& engine, const Arm& arm, Measure& out) {
             out.per_run.push_back(per_round);
             out.round_ms.push_back(ms_round);
         }
-        std::printf("   run %d: tokens %4zu rounds %4llu drafted %6llu accepted %5llu  "
-                    "%7.4f acc/round  %7.3f ms/round  fallback %llu  K=%u  finish %d\n",
-                    index + 1, result.generated_token_ids.size(),
+        std::printf("   run %d: prompt %4zu tokens %4zu rounds %4llu drafted %6llu accepted "
+                    "%5llu  %7.4f acc/round  %7.3f ms/round  fallback %llu  K=%u  finish %d\n",
+                    index + 1, prompt.size(), result.generated_token_ids.size(),
                     static_cast<unsigned long long>(spec.rounds),
                     static_cast<unsigned long long>(spec.drafted_tokens),
                     static_cast<unsigned long long>(spec.accepted_tokens), per_round, ms_round,
@@ -370,11 +370,20 @@ int main() {
     options.use_cuda_graph                = false;
     options.enable_vision                 = false;
     options.kv_cache                      = KvCacheStorage::BFloat16;
-    options.speculative.backend           = SpeculativeBackend::Dspine;
-    options.speculative.draft_tokens      = drafts;
+    // The control-of-the-same-shape probe. The artifact family names one drafter; DFlash2's plan
+    // gate (planning/startup.cpp:676-684) asks exactly "does this target carry the drafter the
+    // option names", so naming dflash2 here is the read-only answer to "is there a DFlash2 arm of
+    // this artifact to measure against at 2.998". `none` is the no-speculative decoding cost.
+    const auto backend_text = setting("NINFER_AB_BACKEND", "dspine");
+    options.speculative.backend = backend_text == "dflash2"
+                                       ? SpeculativeBackend::DFlash2
+                                   : backend_text == "none" ? SpeculativeBackend::None
+                                                            : SpeculativeBackend::Dspine;
+    options.speculative.draft_tokens = backend_text == "none" ? 0U : drafts;
     options.speculative.proposal_head     = ProposalHead::Full;
 
     const auto load_began = std::chrono::steady_clock::now();
+    const auto options_route = options.speculative.backend;
     Engine engine(options);
     const auto load_ms    = std::chrono::duration_cast<std::chrono::duration<double,
             std::ratio<1, 1000>>>(std::chrono::steady_clock::now() - load_began).count();
@@ -391,13 +400,44 @@ int main() {
                              "red. Give the shortest answer first, then one example.";
     const std::string move = "Write a short, practical checklist for migrating a self-hosted web "
                              "service to a new machine without downtime. Number the steps.";
+    // The context-sensitivity tooth. The three drafter-context arms this route had to add
+    // (program/execution.cpp, program/draft_commit.cpp, program/planning/startup.cpp) are what put
+    // the prompt's target-tap field into the drafter's five paged contexts. If they did not work,
+    // the drafter would draft from an empty history and the accepted count would be INDEPENDENT of
+    // the prompt - so a prompt long enough to carry real context must accept measurably better
+    // than a 12-token one. Named by NINFER_AB_PROMPT so the same binary can be re-run on any text.
+    const std::string long_prompt = setting(
+        "NINFER_AB_PROMPT",
+        "The following is a maintenance manual for a self-hosted web service on a single Linux "
+        "machine with one Nginx front door, one Postgres database and a Python API behind Uvicorn. "
+        "Read it carefully and then answer the single question at the end. Section one, the boot "
+        "order: the database opens first, because the API reads its connection string out of the "
+        "database at startup, and the front door opens last, because it reads its upstream list "
+        "out of the service registry. Section two, the log files: the front door writes an access "
+        "log and an error log, the API writes a structured event log, the database writes a slow "
+        "query log, and all four are rotated nightly at ten minutes past two by a timer, not a "
+        "cron job, so that a missed run is visible as a failed unit. Section three, the backup "
+        "recipe: every night at ten minutes past three a dump runs, it is written to a second disk "
+        "and then to object storage, and a restore is exercised on the first Sunday of the month "
+        "against a scratch database so that a dump that cannot be played back is found before it "
+        "is needed. Section four, the migration: a new machine joins the load balancer as a drain "
+        "target first, takes a copy of the database by streaming replication, is promoted by "
+        "flipping one pointer in the registry, and the old machine stays as a drain target for one "
+        "week so that a rollback is a pointer flip in the other direction. Section five, the two "
+        "things that break most often: a certificate that expires while the renewal timer is "
+        "masked by a failed unit, and a schema migration that was applied to the primary and never "
+        "to the replica, which is why the migration is a part of the deploy and not a manual step. "
+        "Question: in the order the manual gives, what is the very first thing that must be true "
+        "before the front door can open? Explain the reason for that order.");
+    const auto custom = setting("NINFER_AB_PROMPT");
     const std::vector<Arm> arms{
         Arm{"sampled", "arm A - prod policy T=0.9, top_k 20, top_p 1.0, min_p 0.05 (prompt 1)",
-            sky, outputs, 0.9f, 20, 1.0f, 0.05f},
+            custom.empty() ? sky : long_prompt, outputs, 0.9f, 20, 1.0f, 0.05f},
         Arm{"greedy", "arm B - the T=0 arm (greedy argmax, no filter), prompt 1",
-            sky, outputs, 0.0f, std::nullopt, std::nullopt, std::nullopt},
+            custom.empty() ? sky : long_prompt, outputs, 0.0f, std::nullopt, std::nullopt,
+            std::nullopt},
         Arm{"sampled", "arm C - prod policy, prompt 2 (the number is not one prompt's)",
-            move, outputs, 0.9f, 20, 1.0f, 0.05f},
+            custom.empty() ? move : long_prompt, outputs, 0.9f, 20, 1.0f, 0.05f},
     };
 
     std::vector<std::pair<std::string, Measure>> per_arm;
@@ -409,7 +449,7 @@ int main() {
         std::fflush(stdout);
         Measure measure;
         try {
-            run(engine, item, measure);
+            run(engine, item, measure, options_route);
         } catch (const std::exception& failure) {
             note(std::string("STOP: the DSpine round stopped at: ") + failure.what());
             return 1;

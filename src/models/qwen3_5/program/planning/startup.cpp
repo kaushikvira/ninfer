@@ -99,9 +99,26 @@ ResourceLayout persistent_layout(const SequencePlanImpl& plan) {
         // the shipped artifacts), so it takes the paged-context half of the masked-draft state
         // and no cyclic local state at all. Its feature rows are the same target-tap field the
         // DFlash2 drafter consumes: hidden_size concatenated over the tap list.
+        //
+        // `layers` is the drafter's own layer count, not zero, for one structural reason: the
+        // masked-draft state carries its local half as a REFERENCE
+        // (`DFlashPersistentState::local`, program/resources.h:77) and the resource build
+        // requires it (`resources.cpp:140-141`: "DFlash StateImage has no local state"), so a
+        // zero-layer spec makes `--spec dspine` unconstructable - the plan gate this line used to
+        // name zero layers threw first, at `plan_cyclic_kv_cache`'s `layers == 0` refusal
+        // (core/cyclic_kv_cache.cpp:25, "Cyclic KV geometry is invalid"), before a byte of weights.
+        // The DSpine round READS ONLY the paged half: `run_dspine_draft` hands
+        // `&*resources.dflash->full` to `dspine_walk` (program/decode.cpp:177-181) and
+        // `dspine_append_context` (decode.cpp:70-82), and every reader of `local` is a
+        // DFlash2-arm site (decode.cpp:19, draft_commit.cpp:37, execution.cpp:79). So this cache is
+        // allocated and never touched by a DSpine round: a cost of
+        // `layers x capacity x kv_heads x head_dim x 2 x 2` = 5 x 8192 x 8 x 128 x 2 x 2 =
+        // 167.6 MiB per Context on this artifact, recorded here as the waste that the shared
+        // masked-draft struct costs a backend that has no local window. Making the half optional
+        // is the real fix and is NOT done here: it edits the struct the DFlash2 path runs on.
         const auto& draft              = *profile.config.dspine;
         spec.state_images.dflash_local = DFlashLocalStateSpec{
-            .layers   = 0U,
+            .layers   = draft.num_hidden_layers,
             .capacity = static_cast<std::uint32_t>(draft.sliding_window),
             .kv_heads = dimension(draft.num_key_value_heads),
             .head_dim = dimension(draft.head_dim),

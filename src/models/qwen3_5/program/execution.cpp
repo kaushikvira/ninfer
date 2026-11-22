@@ -1,5 +1,6 @@
 #include "models/qwen3_5/program/internal.h"
 #include "models/qwen3_5/execution/draft.h"
+#include "models/qwen3_5/execution/dspine.h"
 #include "models/qwen3_5/execution/text.h"
 
 #include <algorithm>
@@ -75,16 +76,43 @@ void RankProgramImpl::progress() {
                     const int width = static_cast<int>(operation.width);
                     auto& draft     = *resources.dflash;
                     auto& frame     = resources.frame;
-                    execution::draft_append_context(
-                        {parameters, resources.work, device.execution_view(), draft.local,
-                         draft.full ? &*draft.full : nullptr, proposal_head},
-                        draft.prefill_features.slice(1, 0, width)
-                            .view({draft.prefill_features.ne[0], width, 1}),
-                        draft.prefill_positions.slice(0, 0, width).view({width, 1}),
-                        frame.valid_columns.slice(0, 0, 1),
-                        frame.state_destination_offsets.slice(0, 0, 1),
-                        frame.backend_table_rows.slice(0, 0, 1),
-                        {operation.width, operation.width});
+                    // The prefill half of the drafter's context update. The DSpine arm is the
+                    // sibling of the one the decode round already takes
+                    // (append_draft_history, decode.cpp:70-82): the same target-tap field, the
+                    // drafter's own paged context, and `dspine_append_context` - because
+                    // `draft_append_context`'s body reads `parameters.draft` and
+                    // `config.draft`, both empty for a DSpine profile (execution/draft.cpp:513),
+                    // which is the named gap D-45 recorded as "no DSpine draft-context append".
+                    // It stops a `--spec dspine` prefill at "draft parameters are unavailable",
+                    // so no DSpine round can ever reach its first draft. DSpine takes no
+                    // `state_destination_offsets`: it declares no sliding window, so it has no
+                    // cyclic State records to write (planning/startup.cpp:96-115).
+                    if (backend == SpeculativeBackend::Dspine) {
+                        if (!draft.full) {
+                            throw std::logic_error(
+                                "DSpine draft context: the drafter has no paged context");
+                        }
+                        execution::dspine_append_context(
+                            execution::DspineExecutionView{parameters, resources.work,
+                                                           device.execution_view(), &*draft.full},
+                            draft.prefill_features.slice(1, 0, width)
+                                .view({draft.prefill_features.ne[0], width, 1}),
+                            draft.prefill_positions.slice(0, 0, width).view({width, 1}),
+                            frame.valid_columns.slice(0, 0, 1),
+                            frame.backend_table_rows.slice(0, 0, 1),
+                            {operation.width, operation.width});
+                    } else {
+                        execution::draft_append_context(
+                            {parameters, resources.work, device.execution_view(), draft.local,
+                             draft.full ? &*draft.full : nullptr, proposal_head},
+                            draft.prefill_features.slice(1, 0, width)
+                                .view({draft.prefill_features.ne[0], width, 1}),
+                            draft.prefill_positions.slice(0, 0, width).view({width, 1}),
+                            frame.valid_columns.slice(0, 0, 1),
+                            frame.state_destination_offsets.slice(0, 0, 1),
+                            frame.backend_table_rows.slice(0, 0, 1),
+                            {operation.width, operation.width});
+                    }
                 }
                 const auto source = resources.frame.input_view(static_cast<int>(operation.width), 1)
                                         .hidden.slice(1, static_cast<int>(operation.width - 1), 1);
