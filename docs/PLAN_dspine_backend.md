@@ -111,8 +111,14 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 - **THE BAR (D-40, measured not assumed)**: prod DFlash2 **K=7 = 2.998 accepted/round**
   over 214,153 live rounds ⇒ **≈4.0 tok/round**. DSpine drafts **K=15** with a
   block-16-trained drafter. **Criterion ⑤ = beat 3.0 accepted/round.**
-- gate (P3, D-26): **3 / 5** — ①tail K1+K2 ✅ ②NVFP4 gather ✅ ③forward: *load half* ✅ /
-  *walk* ⏳ ④whole-round + T=0 byte-exact ⬜ ⑤DSpine ≥ DFlash2 K7 ⬜ **never measured**.
+- gate (P3, D-26): `⚠` **CORRECTED — ④ of ⑤, and ⑤ is MEASURED-AND-LOST, not pending.**
+  ①tail K1+K2 ✅ · ②NVFP4 gather ✅ · ③forward **CLOSED, bit-exact** (D-51: `CHECKS 319,
+  REDS 0`, 9/9 streams × 32 rounds) · ④whole-round: executor == spec **bit-exact**, but
+  spec-vs-torch-reference never established (synthetic activations saturate) ⇒ ⬜ ·
+  ⑤**MEASURED 0.847 vs 1.68–1.78 = LOST** (D-53). **⇒ THERE IS NO P3 WINDOW TO OPEN.**
+  `⚠` **READ THIS BEFORE ACTING ON AN OLDER NOTE**: any "A/B pending / ⑤ never measured /
+  open a5000-2" text elsewhere in this file is **superseded**. The A/B was run **in-card on
+  GPU 1 with a built-in control** (the artifact carries both drafters) and it **lost**.
 - **P3 authorization: granted (D-26), NOT exercised — prod untouched all night.**
 - load path: **CLOSED end-to-end** (D-31/35/37): binds fully, **1.31568 GiB (= D-14
   −2.5 %)**, 55 device objects / 3.83186 GiB with the reused tower head+embedding.
