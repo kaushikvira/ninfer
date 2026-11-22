@@ -701,8 +701,9 @@ int main() {
             if (with_append) {
                 step("dspine_append_context", [&] {
                     execution::dspine_append_context(
-                        view, round.taps.view({g.h * g.taps, ctx, g.b, 1}),
-                        round.context_positions, round.context_counts, round.table_rows,
+                        view, round.taps.slice(2, 0, ctx).view({g.h * g.taps, ctx, g.b, 1}),
+                        round.context_positions.slice(0, 0, ctx),
+                        round.context_counts, round.table_rows,
                         ops::KVCacheAppendPrefixExecutionEnvelope{
                             static_cast<std::uint32_t>(ctx), static_cast<std::uint32_t>(ctx)});
                     cuda_ok(cudaGetLastError(), "dspine_append_context launch");
@@ -780,7 +781,8 @@ int main() {
             const execution::DspineExecutionView view{parameters, arena, cuda, pages.cache_.get()};
             step("dspine_append_context (perturb arm)", [&] {
                 execution::dspine_append_context(
-                    view, round.taps.view({g.h * g.taps, g.ctx, g.b, 1}), round.context_positions,
+                    view, round.taps.view({g.h * g.taps, g.ctx, g.b, 1}),
+                    round.context_positions.slice(0, 0, g.ctx),
                     round.context_counts, round.table_rows,
                     ops::KVCacheAppendPrefixExecutionEnvelope{
                         static_cast<std::uint32_t>(g.ctx), static_cast<std::uint32_t>(g.ctx)});

@@ -4,8 +4,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <set>
+#include <string>
 
 namespace ninfer::models::dspine {
 namespace {
@@ -165,6 +168,59 @@ Config parse_config(const artifact::Component& component, TargetGeometry target)
             throw ArtifactError("invalid target layer index");
         }
         out.target_layer_ids.push_back(index);
+    }
+    // NINFER_DSPINE_TAP_SHIFT / NINFER_DSPINE_TAPS: a DIAGNOSTIC OVERRIDE FOR THE H2 TAP-CONVENTION
+    // MEASUREMENT ONLY. It exists so the A/B probe, which drives the engine's own route, can run the
+    // SAME prompt and policy over a shifted tap list: if a uniform shift of the tower layer the ids
+    // name (the 0-based against 1-based reading of the same list) does not move accepted/round, the
+    // tap convention is not what the D-53 number is explained by. Unset, it changes nothing. It
+    // shifts the LIST THE MANIFEST NAMES; it does not relax a validation (the shifted indices still
+    // go through the same in-range and distinctness rules below) and it prints a loud line so no row
+    // read through it can be mistaken for the artifact's own.
+    if (const auto* shift = std::getenv("NINFER_DSPINE_TAP_SHIFT"); shift && *shift) {
+        const auto delta = std::stol(shift);
+        for (auto& index : out.target_layer_ids) {
+            const auto moved = std::int64_t(index) + delta;
+            if (moved < 0 || std::uint64_t(moved) >= target.layers) {
+                throw ArtifactError("NINFER_DSPINE_TAP_SHIFT names a layer outside the tower");
+            }
+            index = static_cast<std::uint32_t>(moved);
+        }
+        if (std::any_of(out.target_layer_ids.begin(), out.target_layer_ids.end(),
+                        [&](const auto index) { return !unique.insert(index).second; })) {
+            throw ArtifactError("NINFER_DSPINE_TAP_SHIFT collides two target layer indices");
+        }
+        std::printf("DIAGNOSTIC: NINFER_DSPINE_TAP_SHIFT=%ld: the tap list this run reads is [",
+                    static_cast<long>(delta));
+        for (const auto index : out.target_layer_ids) {
+            std::printf("%u ", index);
+        }
+        std::printf("] - this row is NOT the artifact's own tap row\n");
+        std::fflush(stdout);
+    }
+    if (const auto* list = std::getenv("NINFER_DSPINE_TAPS"); list && *list) {
+        std::vector<std::uint32_t> named;
+        std::set<std::uint32_t> distinct;
+        std::string text(list);
+        std::size_t at = 0;
+        while (at < text.size()) {
+            const auto next = text.find(',', at);
+            const auto value = std::stoul(text.substr(at, next == std::string::npos
+                                                               ? std::string::npos
+                                                               : next - at));
+            if (value >= target.layers || !distinct.insert(value).second) {
+                throw ArtifactError("NINFER_DSPINE_TAPS is out of range or not distinct");
+            }
+            named.push_back(static_cast<std::uint32_t>(value));
+            if (next == std::string::npos) {
+                break;
+            }
+            at = next + 1;
+        }
+        out.target_layer_ids = named;
+        std::printf("DIAGNOSTIC: NINFER_DSPINE_TAPS=%s - this row is NOT the artifact's own row\n",
+                    list);
+        std::fflush(stdout);
     }
     out.mask_token_id = integer(config.at("mask_token_id"), "mask token", false);
     if (out.mask_token_id >= target.vocabulary) {
