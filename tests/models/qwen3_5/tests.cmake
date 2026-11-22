@@ -213,3 +213,25 @@ ninfer_add_test(ninfer_qwen3_5_dspine_exec_fidelity_test
   LIBRARIES ninfer_model_loading ninfer_ops ninfer_model_execution)
 set_tests_properties(ninfer_qwen3_5_dspine_exec_fidelity_test PROPERTIES
   SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 1800)
+
+# The FIRST ACCEPTED/ROUND measurement for DSpine, against a REAL target (criterion 5). D-42 moved
+# the number to the a5000-2 lane on the premise that the drafter cannot co-reside with the target
+# tower on GPU 1; D-51 disproved it - the fidelity probe loaded the executor's own shard (tower AND
+# drafter, 20.43905 GiB) on that card and walked 32 rounds bit-exact. This probe runs the round on
+# `ninfer::Engine` (--spec dspine, K=15, batch 1, eager: graph_bodies.cpp:19 refuses a DSpine graph
+# profile), so the four parts of the round are the engine's own: the target forward that produces
+# the verified logits, run_dspine_draft's walk + tail, the ONE verifier
+# ops::speculative_accept_sparse_drafts (decision.cpp:84-99, the call DFlash2 makes), and the
+# accounting at session/commit.cpp:294-308 that turns its counts into stats.speculative. It reports
+# accepted drafts/round on the prod policy (T=0.9, top_k 20, top_p 1.0, min_p 0.05) and a T=0 arm,
+# on prod's own definition (+1 for the verified target token) so the row sits next to DFlash2's
+# measured 2.998 (D-40) and the 3.250 break-even (D-48), plus the per-round histogram and the
+# p0..p14 decay out of the depth census, and ms/round. The accepted column is prod's arithmetic; the
+# card is GPU 1 with basalt live, so the timing columns are indicative, not the lane's. Opt-in by
+# NINFER_TEST_ARTIFACT + NINFER_TEST_DEVICE (D-29: a device probe does not guess a card), skips exit
+# 77, RUN_SERIAL because it owns the card and it is a measurement run.
+ninfer_add_test(ninfer_qwen3_5_dspine_ab_real_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_ab_real.cpp"
+  LIBRARIES ninfer_model_execution ninfer_engine)
+set_tests_properties(ninfer_qwen3_5_dspine_ab_real_test PROPERTIES
+  SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 3600)
