@@ -85,6 +85,14 @@ rewrite a locked line — supersede it with a dated `⚠` line.
 
 ## STATUS (cursor — update + commit at every gate)
 
+- **CLOSED 2026-11-22 — shelved on evidence, kept for future pickup.** Resume point =
+  tag **`dspine-shelved-2026-11-22`** + ledger **D-53/D-54** + this file. **Prod is on
+  DFlash2 K=7 and stayed on it the whole time** (verified at close: `health=200`, 368,393
+  spec rounds, 1,078,433 accepted = **2.93 accepted/round**). Nothing to restore, no P3.
+  Next experiments, cheapest first: **(1) bf16-backbone drafter** (hours — we own the
+  converter; tests whether NVFP4 quantization, not training, is the main loss),
+  **(2) V3-retrained DSpine drafter** (`pipeline/dflash2-retrain` extension, weeks).
+
 - **Watchdog re-armed (hourly)**: scheduled read-only verifier `d39472b7-4289`, cron `:07`
   every hour, 14 runs. It reads STATUS + ledger + git (incl. **unpushed**), `lane status`
   (basalt never down; prod must serve; **`a5000-11` down by user decision — not drift**),
