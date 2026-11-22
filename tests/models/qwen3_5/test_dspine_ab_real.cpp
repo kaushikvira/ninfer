@@ -42,6 +42,33 @@
 // which a self-referential chain does not have. If the number lands >10/round, this line is the
 // first suspect list.
 //
+// THE ROW IT PUBLISHED (GPU 1, RTX PRO 5000 pci c1:00, CUDA_VISIBLE_DEVICES=1, the V3
+// `…_dspine-nvfp4tables.ninfer` shard, K=15, batch 1, eager, 3 prompts, every count the engine's
+// own). The artifact carries BOTH drafters - DFlash2 is the V3 tower's own - so the control arm of
+// the SAME card, SAME prompts, SAME policy, SAME verifier exists in the same binary:
+//
+//   backend    K    arm      accepted drafts/round   prod-def (+1)   ms/round   rounds   p0   depth
+//   DFlash2    7    T=0.9    1.6809                  2.6809            25.47       94     .72   p6
+//   DFlash2    15   T=0.9    1.7802  (0..9)          2.7802            27.40      273     .70   p9
+//   DFlash2    15   T=0      2.2308  (0..11)         3.2308            27.35      117     .67   p11
+//   DSpine     15   T=0.9    0.8467  (0..5)          1.8467            27.60      411     .55   p5
+//   DSpine     15   T=0      0.7746  (0..5)          1.7746            27.46      213     .45   p5
+//
+// THE HEADLINE: at the SAME window (K=15) on the SAME card and prompts, DSpine drafts 0.47x what
+// the artifact's own DFlash2 drafter drafts (0.8467 against 1.7802) for the same round cost (27.6
+// against 27.4 ms), and its per-position curve is BOTH lower at p0 (.55 against .70) AND steeper -
+// it dies at p5 where DFlash2 reaches p9. The wide window is not buying DSpine what it buys
+// DFlash2. The absolutes are under prod's 2.998 (that row is the 5090, graphs on, batch 8, prod
+// traffic, D-48's own caveat), so the ratio at equal window is the reading that transfers.
+//
+// THE CAVEAT THAT NARROWS IT (a tooth, not a fix). `NINFER_AB_PROMPT` re-runs every arm on one
+// prompt. On a 316-token prompt DFlash2 moves 1.78 -> 1.52 (-15 %) while DSpine moves 0.85 -> 0.22
+// (-74 %), and its p0 falls .55 -> .17. A drafter whose drafts get WORSE as the context grows is
+// the signature of a context feed that is not landing, and the three DSpine context arms this
+// route had to add (prefill, commit, plan) are new and unreviewed. So 0.8467 is a LOWER BOUND on
+// DSpine whose first suspect is named; the 0.47x deficit at equal window is what the harness
+// supports today.
+//
 // THE ROUND DISTRIBUTION. The public counters publish, per request, `rounds`, `accepted_tokens`
 // and the depth census `accepted_per_position[j]` = the number of rounds whose j-th draft was
 // accepted. That census IS the distribution: rounds that accepted at least d drafts =
