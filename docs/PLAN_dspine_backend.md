@@ -151,9 +151,9 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **tmpfs RAM sinks** (`/tmp` is RAM here) and `MemAvailable`. Report caps at 12 lines and
   names the next best action if main looks stuck.
 
-- phase: **P2 — EXECUTOR ROUND WRITTEN (walk + append + Parameters), `dspine_walk` NEVER
-  EXECUTED (D-49); next = port-fidelity probe (append→walk→tail vs the probe's walk,
-  ≥32 rounds).**
+- phase: **P2 — CRITERION 3 CLOSED (D-51): the executor walk is BIT-EXACT to the reviewed
+  spec (`CHECKS 319, REDS 0`, 9/9 streams × 32 rounds). Next = real-prefill fixture
+  (criterion 4's remaining half) → lane A/B (criterion 5).**
 - OLD phase note (D-42, still true of the probe): **RESET DONE, ACCEPTANCE UNMEASURABLE IN
   THE PROBE**.
   `0201b102`: round reset ⇒ a round is a pure function of its inputs (`0 of 37 byte
@@ -1196,6 +1196,41 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   insisted the port was only *structural* until something drove it. Also worth noting: the
   executor shard needs **20.44 GiB** because it materializes the tower too, so on GPU 1
   this probe runs with ~4 GiB left — one process at a time, no lane co-residency.
+
+- **D-2026-11-21-51** — **CRITERION 3 CLOSED: THE EXECUTOR WALK IS BIT-EXACT TO THE
+  REVIEWED SPEC.** Merged `f7909ae7` (+ `77aabb2d`). The executor's own
+  `append → walk → tail` drove the fidelity probe to **`CHECKS 319, REDS 0`** —
+  **9 of 9 published streams bit-exact in 32 of 32 rounds**, **0 parted
+  round-to-round on both arms**, against the **untouched** reference probe
+  (`test_dspine_forward_real.cpp`, 22/22). So `dspine_walk` is no longer "structural":
+  **it executes and publishes the specification's bytes.**
+  **D-50 closed the right way**: the bridge's six **matmul operands** bind as the uses the
+  artifact declares (each V3 manifest declares exactly one, `A16Only` — the policy the walk
+  passes to `ops::linear`), while `gate_bias` and the three **vocabulary-indexed tables stay
+  `direct`**: *"a gathered table has no mathematical use to name, and inventing one to
+  satisfy a linear-use rule would be the invention the rule exists to refuse."* Gathered
+  NVFP4/Q8 tables name `input_scale 1.0` because `validate_nvfp4_weight` requires it
+  positive and they carry no use to hold a scale. `weights.cpp:18`'s rule **untouched**.
+  `⚠` **SEVEN EXECUTOR BUGS the fidelity probe caught — none had ever executed (D-49)**:
+  (1) the code projection's **input was the codes, not the normed stream** (read weight is
+  `[code, hidden]`); (2) the write slice was **the transpose of its own object** —
+  `stacked` names a row range by `(rows, columns)` and the object is `[layers, hidden,
+  rank]`, so layer *i* is `(hidden, rank)`; it passed `(rank, hidden)` = the same bytes
+  under a transposed matrix (**five rows PARTED at one device address**); (3) the five head
+  streams were **row-flat** where `rmsnorm`/`rope`/`context_softmax_attention`/
+  `kv_cache_append_prefix` all name a `[head_dim]` geometry (element counts identical ⇒ **no
+  byte moved** — a silent mismatch); (4) the bridge recomputed the block's column count as
+  `hidden × columns` instead of taking it from the round; (5) **`DspineBridgeParameters::
+  gate_bias` was never bound** (numel 0 into `dspine_message`); (6) gathered tables bound
+  with **no input scale**; (7) the executor's prepared Q8 head carried `input_scale 0`.
+  No kernel, numeric, tolerance or DFlash2 file touched.
+  **Also required and merged** (`77aabb2d`): the **synthetic load fixture** must declare the
+  bridge Uses the V3 manifests declare, or the loading test cannot bind under the new rule —
+  verified green (`DSpine load-side checks passed`).
+  **GATE NOW**: ①✅ tail K1+K2 · ②✅ NVFP4 gather · ③✅ **forward end-to-end, bit-exact** ·
+  ④🟡 executor == spec is **bit-exact**, but **spec vs the torch reference is still not
+  established** (synthetic activations saturate, D-39 red 3) ⇒ needs the **real-prefill
+  fixture** · ⑤⬜ acceptance vs 2.998 — needs the lane.
 
 ## OBJECTIVE
 
