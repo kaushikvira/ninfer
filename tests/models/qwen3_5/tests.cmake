@@ -192,3 +192,24 @@ ninfer_add_test(ninfer_qwen3_5_dspine_tail_cost_test
   LIBRARIES ninfer_model_loading ninfer_ops)
 set_tests_properties(ninfer_qwen3_5_dspine_tail_cost_test PROPERTIES
   SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 3600)
+
+# The DSpine PORT-FIDELITY probe (D-49's open item): the executor's own
+# execution::dspine_append_context -> dspine_walk -> dspine_propose_tail, driven over
+# parameters.dspine on a real V3 drafter for N >= 32 rounds, compared per published stream against
+# the forward probe's walk (run_forward/run_bridge) on identical inputs. It is the probe that
+# turns D-49's STRUCTURAL grade into a bit-parity table, and it is the first execution of
+# dspine_walk: no probe drove it, and the decode loop that does needs a target tower. The load is
+# the engine's own (read_definition -> describe_model -> resolve_load -> materialize_model ->
+# execution::Parameters) so the BINDING is under test too - the packed Q/K/V parents and the
+# stacked bridge slices that a probe-side over_object also computes - and one shard serves both
+# arms, because this artifact's tower plus drafter is 24.115 GiB and the card's free memory is
+# ~25.4 GiB: the probe refuses on the card's own numbers before allocating, rather than repeat
+# D-47's stop. Its device bring-up is test_dspine_tail_cost.cpp's verbatim (D-47). Opt-in by
+# NINFER_TEST_ARTIFACT + NINFER_TEST_DEVICE (D-29), skips exit 77; the tower load makes it slow to
+# open, and it is RUN_SERIAL because it owns the card.
+ninfer_add_test(ninfer_qwen3_5_dspine_exec_fidelity_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_exec_fidelity.cpp"
+          "${PROJECT_SOURCE_DIR}/src/models/common/dspine/dspine_serial_tail.cpp"
+  LIBRARIES ninfer_model_loading ninfer_ops ninfer_model_execution)
+set_tests_properties(ninfer_qwen3_5_dspine_exec_fidelity_test PROPERTIES
+  SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 1800)

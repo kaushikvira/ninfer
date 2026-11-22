@@ -171,15 +171,49 @@ Weights bind_weights(Bindings& b, const Config& config, TargetGeometry target,
     const auto tg_name       = component + "/bridge/tg";
     const auto tsv_name      = component + "/bridge/tsv";
     out.bridge.codebook = b.direct_as_declared(codebook_name, {v, c}, kBridgeTableFormats);
-    out.bridge.early_read_weights = b.direct(component + "/bridge/early_read_weights",
-                                             {config.num_hidden_layers - 1, c, h});
-    out.bridge.read_weight = b.direct(component + "/bridge/read_weight", {c, h});
+    // The bridge's six MATMUL OPERANDS are bound as the uses the artifact declares for them, not
+    // as input-less direct tensors. The rule they are bound for is `weights.cpp:15-18`: a
+    // parameter that does not carry exactly one declared use is only usable through a named
+    // `WeightUseId`, because the use is what carries the operation's activation policy and
+    // calibration. `Bindings::direct` passes no input, so a parameter bound that way carries NO
+    // use and the drafter's projection binds are then refused by the binder - the binding stop
+    // D-49's fidelity probe found at `dspine/bridge/gate`. Each of the three shipped V3 manifests
+    // declares exactly one use for each of the six, all `A16Only`, which is the policy the walk
+    // passes to `ops::linear` for them (execution/dspine.cpp:407,429) and the forward probe's
+    // literal, so naming it binds the same operation the artifact describes and adds no
+    // permission. The format requirement `direct` imposed is kept verbatim (BF16).
+    //
+    // `gate_bias` and the three vocabulary-indexed tables below stay `direct`: the artifact
+    // declares NO use for any of them, because none of them is a matmul operand - the bias is
+    // added by `ops::dspine_message`, and `tg`, `tsv` and the codebook are gathered by row inside
+    // `ops::dspine_serial_scores` / `ops::dspine_normalize_codes`. A gathered table has no
+    // mathematical use to name, and inventing one to satisfy a linear-use rule would be the
+    // invention the rule exists to refuse.
+    const auto bridge_input = [&](const std::string_view suffix) {
+        return component + "/bridge/" + std::string(suffix);
+    };
+    out.bridge.early_read_weights =
+        b.parameter(bridge_input("early_read_weights"),
+                    {config.num_hidden_layers - 1, c, h},
+                    {bridge_input("early_read_input")},
+                    QType::BF16);
+    out.bridge.read_weight = b.parameter(bridge_input("read_weight"),
+                                         {c, h},
+                                         {bridge_input("read_input")},
+                                         QType::BF16);
     out.bridge.feature_write_weights =
-        b.direct(component + "/bridge/feature_write_weights", {config.num_hidden_layers, h, r});
-    out.bridge.gate             = b.direct(component + "/bridge/gate", {r, c});
-    out.bridge.gate_bias        = b.direct(component + "/bridge/gate_bias", {r});
-    out.bridge.predecessor_gate = b.direct(component + "/bridge/predecessor_gate", {r, c});
-    out.bridge.prev             = b.direct(component + "/bridge/prev", {r, c});
+        b.parameter(bridge_input("feature_write_weights"),
+                    {config.num_hidden_layers, h, r},
+                    {bridge_input("message_input")},
+                    QType::BF16);
+    out.bridge.gate = b.parameter(bridge_input("gate"), {r, c}, {bridge_input("packed_input")},
+                                  QType::BF16);
+    out.bridge.gate_bias = b.direct(bridge_input("gate_bias"), {r});
+    out.bridge.predecessor_gate =
+        b.parameter(bridge_input("predecessor_gate"), {r, c}, {bridge_input("packed_input")},
+                    QType::BF16);
+    out.bridge.prev = b.parameter(bridge_input("prev"), {r, c}, {bridge_input("packed_input")},
+                                  QType::BF16);
     out.bridge.tg  = b.direct_as_declared(tg_name, {v, r}, kBridgeTableFormats);
     out.bridge.tsv = b.direct_as_declared(tsv_name, {v, 2 * r}, kBridgeTableFormats);
     // ops::dspine_serial_scores indexes tg and tsv as one representation (tg.qtype ==

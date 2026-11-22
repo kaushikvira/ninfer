@@ -156,6 +156,16 @@ struct DspineParameters {
     std::vector<DspineBlockParameters> layers;
     DspineBridgeParameters bridge;
     Weight token_embedding;
+    // The proposal head, bound through the head's DSpine USE. `text/output_head` is one object
+    // with four declared uses in every V3 manifest (text, mtp, dflash2, dspine), so it is a
+    // multi-use parameter and the single-use rule at models/common/weights.cpp:17 refuses it by
+    // id: the round must name which use it is multiplying. It names `dspine/final_hidden`, which
+    // the manifest gives the policy `AllowA8` where the text tower's own use carries `A16Only`;
+    // the definition resolves that use into `dspine::Weights::output_head_use`
+    // (qwen3_5/definition.cpp:126-129) and nothing read it until now. The bytes are the tower's
+    // one materialized head either way - the two ids are aliased - so this is the declared use
+    // being selected, not a second weight.
+    LinearParameters output_head;
 };
 
 // Cold native preparation for the fixed model implementation. This owner is stable before

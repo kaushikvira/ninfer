@@ -268,15 +268,36 @@ public:
         DspineParameters out;
         out.final_norm        = tensor(w.final_norm);
         out.gate_bias         = tensor(w.bridge.gate_bias);
-        out.tg                = native_weight(model_.weight(w.bridge.tg).view);
-        out.tsv               = native_weight(model_.weight(w.bridge.tsv).view);
+        // THE BRIDGE CARRIES ITS OWN GATE BIAS. `DspineBridgeParameters::gate_bias`
+        // (execution/parameters.h:136) is what `dspine_bridge` hands `ops::dspine_message`, and the
+        // binding only ever filled the top-level one that the tail reads, so the walk reached that
+        // op with a default-constructed Tensor - numel 0, no bytes - and the op's own gate
+        // ("gate_bias must be BF16 [R]", src/ops/dspine_bridge/dspine_bridge.cpp:96) was the stop.
+        // One object, two structs that name it; both are now bound.
+        out.bridge.gate_bias  = tensor(w.bridge.gate_bias);
+        // THE SCALE ARGUMENT IS PART OF THE WEIGHT, NOT A FORMALITY. `native_weight(view)`
+        // defaults the INPUT scale to 0, and the ops that gather these tables gate on it:
+        // `validate_nvfp4_weight` (src/ops/common/host/operands.cpp:143-145) refuses a weight
+        // whose `input_scale` is not positive, and the binding is where that is decided - the
+        // codebook row of the fidelity probe's binding table parted on this field alone, on
+        // identical bytes, planes, planes' scales, shape and representation, the specification
+        // carrying 1 and the executor 0. The reference arm names the identity scale 1.0F
+        // (test_dspine_forward_real.cpp:252); a gathered table has no use to carry a scale in, so
+        // the scale is named here.
+        out.tg                = native_weight(model_.weight(w.bridge.tg).view, 1.0F);
+        out.tsv               = native_weight(model_.weight(w.bridge.tsv).view, 1.0F);
         out.feature_projection = linear(w.feature_projection);
         out.context_norm       = tensor(w.context_norm);
         // The drafter embeds its block with the TOWER's own token embedding; the definition
         // aliases the id (qwen3_5/definition.cpp:98), so this names the tower's one materialized
         // object and the drafter carries no copy of it (D-37).
-        out.token_embedding = native_weight(model_.weight(w.token_embedding).view);
-        out.bridge.codebook = native_weight(model_.weight(w.bridge.codebook).view);
+        out.token_embedding = native_weight(model_.weight(w.token_embedding).view, 1.0F);
+        out.bridge.codebook = native_weight(model_.weight(w.bridge.codebook).view, 1.0F);
+        // The head by its DSpine use: `text/output_head` carries four declared uses, so the id
+        // form of `weight_input` (models/common/weights.cpp:17) refuses it and the round names
+        // `dspine/final_hidden` instead - the use the manifest gives this drafter. Same object,
+        // same bytes, the declared policy of the use it is read under.
+        out.output_head = linear(w.output_head_use);
         out.bridge.gate             = linear(w.bridge.gate);
         out.bridge.predecessor_gate = linear(w.bridge.predecessor_gate);
         out.bridge.prev             = linear(w.bridge.prev);
@@ -297,9 +318,18 @@ public:
             out.bridge.read.push_back(
                 stacked(w.bridge.early_read_weights, layer, read[0], read[1]));
         out.bridge.read.push_back(linear(w.bridge.read_weight).weight);
+        // THE WRITE SLICE IS [hidden, rank], NOT [rank, hidden]. `stacked` names a row range by
+        // (rows, columns) and builds the matrix out of the two, so the pair is the slice's shape
+        // and not only its size: the object is [layers, hidden, rank], so layer i's matrix is
+        // (hidden, rank). Passing (rank, hidden) labels the very same bytes as the transpose, and
+        // `ops::linear(message [rank,T], write, delta [hidden,T])` then reads a weight whose K is
+        // `hidden` - the write projection's shape stop, invisible in the byte range alone. The
+        // read side is already in the object's order, and the fidelity probe's BINDING table is
+        // where the two parts (test_dspine_exec_fidelity.cpp, the five `bridge write (stacked)`
+        // rows at one and the same device address).
         for (std::size_t layer = 0; layer < layers; ++layer)
             out.bridge.write.push_back(
-                stacked(w.bridge.feature_write_weights, layer, write[2], write[1]));
+                stacked(w.bridge.feature_write_weights, layer, write[1], write[2]));
 
         out.layers.reserve(w.layers.size());
         for (std::size_t i = 0; i < w.layers.size(); ++i) {
