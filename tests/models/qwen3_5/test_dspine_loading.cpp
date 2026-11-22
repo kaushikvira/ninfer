@@ -252,13 +252,24 @@ struct DspineFixture {
         // Bridge + TG/TSV tables. codebook/tg/tsv carry the varied representation; the rest of
         // the bridge stays BF16.
         table("dspine/bridge/codebook", {vocab, code_size});
-        parameter("dspine/bridge/early_read_weights", {layers - 1, code_size, h});
-        parameter("dspine/bridge/read_weight", {code_size, h});
-        parameter("dspine/bridge/feature_write_weights", {layers, h, rank});
-        parameter("dspine/bridge/gate", {rank, code_size});
+        // The six bridge MATMUL OPERANDS carry the Use the recipe declares for them, exactly as
+        // all three shipped V3 manifests do (`@dspine/bridge/early_read_input`,
+        // `@read_input`, `@message_input`, and `@packed_input` for the three gate/value
+        // projections; each one A16Only). The loader binds them as that use - a parameter with no
+        // declared use cannot reach `weight_input`, which is the rule the DSpine round now runs
+        // on - so a fixture that declared none would describe an artifact no V3 drafter is.
+        // `gate_bias` keeps no use: it is added by `dspine_message`, not multiplied, and the
+        // tables below are gathered by row, and no manifest declares a use for either kind.
+        parameter("dspine/bridge/early_read_weights", {layers - 1, code_size, h},
+                  "dspine/bridge/early_read_input");
+        parameter("dspine/bridge/read_weight", {code_size, h}, "dspine/bridge/read_input");
+        parameter("dspine/bridge/feature_write_weights", {layers, h, rank},
+                  "dspine/bridge/message_input");
+        parameter("dspine/bridge/gate", {rank, code_size}, "dspine/bridge/packed_input");
         parameter("dspine/bridge/gate_bias", {rank});
-        parameter("dspine/bridge/predecessor_gate", {rank, code_size});
-        parameter("dspine/bridge/prev", {rank, code_size});
+        parameter("dspine/bridge/predecessor_gate", {rank, code_size},
+                  "dspine/bridge/packed_input");
+        parameter("dspine/bridge/prev", {rank, code_size}, "dspine/bridge/packed_input");
         table("dspine/bridge/tg", {vocab, rank});
         table("dspine/bridge/tsv", {vocab, 2 * rank});
         // Update the declared payload size to include the DSpine tensors.
