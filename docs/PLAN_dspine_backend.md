@@ -151,7 +151,12 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   **tmpfs RAM sinks** (`/tmp` is RAM here) and `MemAvailable`. Report caps at 12 lines and
   names the next best action if main looks stuck.
 
-- phase: **P2 — CRITERION 3 CLOSED (D-51): the executor walk is BIT-EXACT to the reviewed
+- **phase: P2 SHELVED ON EVIDENCE (D-53/D-54).** DSpine K=15 measures **0.847** accepted/round
+  (prod-calibrated **≈1.51**) vs the same artifact's own DFlash2 **1.68–1.78** (**≈3.18**) at
+  the **same round cost**; feed, taps and arithmetic all verified correct ⇒ **the limit is
+  drafter proposal quality**, reachable only by a **V3-tailored DSpine drafter** (a training
+  project). **No P3, no promotion.**
+- (historical) phase: **P2 — CRITERION 3 CLOSED (D-51): the executor walk is BIT-EXACT to the reviewed
   spec (`CHECKS 319, REDS 0`, 9/9 streams × 32 rounds). Next = real-prefill fixture
   (criterion 4's remaining half) → lane A/B (criterion 5).**
 - OLD phase note (D-42, still true of the probe): **RESET DONE, ACCEPTANCE UNMEASURABLE IN
@@ -1310,6 +1315,42 @@ rewrite a locked line — supersede it with a dated `⚠` line.
   (`dflash2_real_test` at batch 8 / 2304 ctx / graphs stops at "Device budget cannot hold
   model weights and required execution resources"). Full engine route costs **23.97266 GiB**,
   free 25115 → **567 MiB**.
+
+- **D-2026-11-21-54** — `⚠` **VERDICT: DSpine ON OUR V3 TOWER IS NOT COMPETITIVE — SHELVE P2.
+  The wall is DRAFTER PROPOSAL QUALITY, and it is now proven not to be plumbing.**
+  `mwr5sfq8-e5e8` refuted all three wiring hypotheses **by measurement**, executor untouched
+  (the only `src/` change is an env-gated diagnostic in the dspine config parser; unset ⇒
+  byte-identical):
+  - **H1 — the appended context KV IS read**: overwriting one appended page's bytes moves
+    **7 of 9** published streams (incl. the draft ids), for **each** page; a 575-call
+    instrumented trace shows every round's appended total **equals** the next walk's attended
+    frontier (`57→57, 59→59, 60→60 … 75→75`) — **no holes**. (Probe
+    `test_dspine_context_feed.cpp`.)
+  - **H3 — no staleness**: exactly one context append per round; the frontier advances by
+    exactly the accepted count.
+  - **H2 — the taps land**: same prompt/policy, only the tap list varies ⇒ `[1,16,31,46,61]`
+    (manifest) **1.1724** acc/round; 0-based `[0,15,30,45,60]` **1.2500 (+6.6 %)**; +1
+    **1.1000 (−6.2 %)**; **reversed 0.0333 (−97 %)**; **clustered `[1,2,3,4,5]` 0.0690
+    (−94 %)**; `[57..61]` 0.1887. ⇒ the field reaches `feature_projection` **in the
+    manifest's order** and is **load-bearing**; the 0-vs-1-based seam is a ±6 % slope, not
+    the 43 % gap.
+  **So the finding is**: with **bit-exact arithmetic** (D-51), a **verified feed** (H1/H3) and
+  **correct taps** (H2), the stock DSpine drafter lands **1–2 drafts per round at K=15** and
+  **45 % of rounds accept nothing**, against the same artifact's own DFlash2 at **1.68–1.78**
+  for the **same round cost**. Calibrated: **≈1.51 vs ≈3.18** on prod's scale. **No wiring
+  fix reaches 3.25.**
+  **Why this was always the likely end** (and the plan said it): **D-15** — the V3 tower is a
+  *post-trained* fusion, and *"the unmodified drafter scored 0.3–1.1 % acceptance"* on a
+  fine-tuned tower. DSpine's 5.58 tok/round headline is on the **official** tower with its
+  **official** drafter. Both our drafters are stock; **DSpine's stock drafter degrades worse
+  on V3 than DFlash2's**, and its window is **structurally locked at 15** (`dspine_walk:474`
+  requires `width == block_size = 16`), so there is no cheaper-window fallback.
+  **Decision: SHELVE P2 on evidence.** What is banked and reusable: the port (D-51 bit-exact),
+  the parity harnesses, the NVFP4 gather path, the sampled tail (K1+K2), the cost curve
+  (D-48), the A/B probe (a real target+drafter harness with a **built-in control**), and the
+  finding itself. **What would change the verdict: a V3-tailored DSpine drafter** — i.e. the
+  `pipeline/dflash2-retrain` capability (D-16's "bonus") extended to DSpine, which is a
+  **training project, not an infra one**. **Do not promote; do not open P3.**
 
 ## OBJECTIVE
 
