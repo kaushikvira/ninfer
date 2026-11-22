@@ -235,3 +235,25 @@ ninfer_add_test(ninfer_qwen3_5_dspine_ab_real_test
   LIBRARIES ninfer_model_execution ninfer_engine)
 set_tests_properties(ninfer_qwen3_5_dspine_ab_real_test PROPERTIES
   SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 3600)
+
+# H1 of the D-53 context-feed diagnostic: IS THE DSpine DRAFT PATH ACTUALLY FED THE TARGET'S STATE.
+# D-53's lower bound (DSpine 0.85 accepted/round, and -74 % on a 316-token prompt against DFlash2's
+# -15 %) names the drafter's context feed as the first suspect, and the three arms that make the
+# measurement run at all (program/execution.cpp prefill, program/draft_commit.cpp commit,
+# program/planning/startup.cpp local-state) are new and unreviewed. This probe drives the
+# executor's own `dspine_append_context` -> `dspine_walk` -> `dspine_propose_tail` over the
+# engine's own `PagedKVCache` and (a) overwrites the bytes of ONE logical context page after the
+# append and reports which published streams move, page by page over a context that spans two
+# pages, (b) prints the page table the round publishes, the page indices the append writes and the
+# page indices the attention reads, and (c) re-seeds the target-tap field alone as the positive
+# control on the walk's input path. It is a WIRING measurement on the drafter alone - accepted/round
+# against a real target is `test_dspine_ab_real.cpp`, not this - and it loads the executor's own
+# shard, so it owns the card. Device bring-up and the load path are
+# test_dspine_exec_fidelity.cpp's verbatim (D-47). Opt-in by NINFER_TEST_ARTIFACT +
+# NINFER_TEST_DEVICE (D-29), skips exit 77.
+ninfer_add_test(ninfer_qwen3_5_dspine_context_feed_real_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/test_dspine_context_feed.cpp"
+          "${PROJECT_SOURCE_DIR}/src/models/common/dspine/dspine_serial_tail.cpp"
+  LIBRARIES ninfer_model_loading ninfer_ops ninfer_model_execution)
+set_tests_properties(ninfer_qwen3_5_dspine_context_feed_real_test PROPERTIES
+  SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "real;dspine;gpu" TIMEOUT 1800)
